@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.10.6 - 2026-10-11
+
+- The coordination skill asks both managers to know who each piece of work is for, keep anything meant for someone else (notes, evidence, caveats, test controls) out of the work, and check the result the way that person will use it. Engineering reviews code with the code-review skill and CI, and designs, images and copy by looking at each one at full size, without tests or review rounds unless the user asks.
+
 ## 2026.10.5 - 2026-10-11
 
 - The coordination skill asks engineering to judge what is at stake by what code is for and how long it will live, giving a temporary stage only what it needs and asking when unsure, and not to build in limits, policies or safeguards a request doesn't need.
