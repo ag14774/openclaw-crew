@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- The coordination skill asks engineering to judge what is at stake by what code is for and how long it will live, giving a temporary stage only what it needs and asking when unsure, and not to build in limits, policies or safeguards a request doesn't need.
 - The coordination skill asks for repository docs that say how things work and how to work on them, each thing once, with test results in the PR description, and that drop what deferred or dropped work left behind unless the user wants a plan kept.
 
 ## 2026.10.4 - 2026-10-10
