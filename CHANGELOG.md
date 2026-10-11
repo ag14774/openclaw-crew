@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- The coordination skill asks for repository docs that say each thing once, keep the limits of a check in the PR rather than the docs, and drop what deferred or dropped work left behind unless the user wants a plan kept.
+- The coordination skill asks for repository docs that say how things work and how to work on them, each thing once, with test results in the PR description, and that drop what deferred or dropped work left behind unless the user wants a plan kept.
 
 ## 2026.10.4 - 2026-10-10
 
