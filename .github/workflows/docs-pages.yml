@@ -3,7 +3,9 @@ name: Documentation Pages
 on:
   push:
     branches: [main]
-    tags: ['v*.*.*']
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
 
 permissions:
   contents: read
@@ -33,7 +35,7 @@ jobs:
           path: site
 
   deploy:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10

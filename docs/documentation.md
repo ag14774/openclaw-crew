@@ -31,7 +31,7 @@ To upgrade dependencies deliberately, change the pin, regenerate with `uv lock`,
 
 `docs-check.yml` validates that same artifact on pull requests with read-only repository permissions. It does not deploy or publish previews.
 
-`docs-pages.yml` runs on pushes to **main** and version tags. Every run checks out latest main with all tags, builds the complete artifact and uploads it to Pages. Its build job has only repository read permission; a separate `github-pages` deployment job has `pages: write` and `id-token: write`. This docs workflow does not release or deploy the plugin. Zensical build caching is not used in CI.
+`docs-pages.yml` runs on pushes to **main** and after a successful Release workflow. Every run checks out latest main with all tags, builds the complete artifact and uploads it to Pages. Its build job has only repository read permission; a separate `github-pages` deployment job has `pages: write` and `id-token: write`. This docs workflow does not release or deploy the plugin. Zensical build caching is not used in CI.
 
 The configured canonical URL is **`https://ageorgiou.com/openclaw-jarvis-gilfoyle/`**. Pages publishes from GitHub Actions. A successful local or PR build does not establish that hosting is configured or live.
 
