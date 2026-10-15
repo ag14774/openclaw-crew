@@ -2,6 +2,8 @@
 
 This site uses standard [Zensical](https://zensical.org/docs/) **0.0.68** with `zensical.toml`, the bundled modern theme, native search and Markdown. There are no custom templates, JavaScript, analytics or remote fonts. The existing pixel logo is used unchanged.
 
+The header links to the repository beside search using Zensical's native repository integration.
+
 ## Reproducible environment
 
 Use **Python 3.13.5** (the CI version) and **uv 0.12.10**. `pyproject.toml` pins Zensical; `uv.lock` pins its transitive dependencies and distribution hashes. From the repository root:

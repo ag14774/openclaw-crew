@@ -3,6 +3,8 @@ site_name = "Jarvis-Gilfoyle"
 site_description = "A small project board for cooperative OpenClaw agents."
 # Project Pages inherits the account custom domain; keep the repository base path.
 site_url = "https://ageorgiou.com/openclaw-jarvis-gilfoyle/"
+repo_url = "https://github.com/ag14774/openclaw-jarvis-gilfoyle"
+repo_name = "ag14774/openclaw-jarvis-gilfoyle"
 docs_dir = "docs"
 site_dir = "site"
 dev_addr = "127.0.0.1:8000"
