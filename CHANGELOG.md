@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The documentation header links to the repository beside search.
+- The documentation's native version selector offers main and genuine release snapshots starting at v2026.10.6. Pages builds retain all release documentation from that baseline, with existing current-page URLs redirecting to main.
+
 ## 2026.10.6 - 2026-10-11
 
 - The coordination skill asks both managers to know who each piece of work is for, keep anything meant for someone else (developer notes, evidence, test controls, reviewer-only caveats) out of the work while keeping limitations the person needs, and check the result the way that person will use it. Engineering reviews code with the code-review skill and CI, and designs, images and copy by looking at each one at full size, without tests or review rounds unless the user asks.
