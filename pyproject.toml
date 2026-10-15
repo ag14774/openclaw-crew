@@ -3,7 +3,11 @@ name = "jarvis-gilfoyle-docs"
 version = "0.1.0"
 description = "Documentation build environment for OpenClaw Jarvis-Gilfoyle"
 requires-python = ">=3.13,<3.14"
-dependencies = ["zensical==0.0.68"]
+dependencies = [
+  "zensical==0.0.68",
+  "mike @ git+https://github.com/squidfunk/mike.git@2d4ad799442f4592db8ad53b179bfb33db8c69ac",
+  "tomli-w==1.2.0",
+]
 
 [tool.uv]
 package = false

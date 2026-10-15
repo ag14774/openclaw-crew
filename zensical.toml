@@ -46,3 +46,6 @@ toggle.name = "Switch to light mode"
 [project.validation]
 invalid_links = true
 invalid_link_anchors = true
+
+[project.extra.version]
+provider = "mike"

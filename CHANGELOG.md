@@ -3,6 +3,7 @@
 ## Unreleased
 
 - The documentation header links to the repository beside search.
+- The documentation's native version selector offers main and genuine release snapshots starting at v2026.10.6. Pages builds retain all release documentation from that baseline, with existing current-page URLs redirecting to main.
 
 ## 2026.10.6 - 2026-10-11
 
