@@ -1495,13 +1495,13 @@ export class BoardRuntime {
     const project = this.store.project(task.project);
     const last = this.store.notes(task.id, 1)[0];
     const who = this.agentName(task.holder);
-    const message = `${project.name}: task #${task.id} "${task.title}" is waiting on ${who}, who has not acted on the last ${STALL_WAKES} wake-ups.${last ? ` Last note (${last.author}): ${clip(last.text, 500)}` : ''}`;
+    const message = `${project.name}: task #${task.id} "${task.title}" is waiting on ${who}, whose wake-ups have gone unanswered or could not be delivered.${last ? ` Last note (${last.author}): ${clip(last.text, 500)}` : ''}`;
     const id = this.store.tx(() => {
       this.store.run('UPDATE tasks SET stalled=? WHERE id=?', this.now(), task.id);
       this.store.note(
         task.id,
         'plugin',
-        `Stalled: the holder did not act on ${STALL_WAKES} wake-ups; the user was told.`,
+        `Stalled: wake-ups went unanswered or undelivered; the user was told.`,
       );
       return this.store.enqueue(project.id, task.id, message);
     });
