@@ -1,7 +1,10 @@
 # Changelog
 
-## Unreleased
+## 2026.10.7 - 2026-10-16
 
+- A holder who does not act on its wake-ups is reported to the user even while the other manager keeps writing to the task. Before, anyone's note reset the count, a task with an outstanding change was never reported, and a wake that failed to dispatch did not count, so a manager whose session could not run went unreported for hours. Now the holder's own update (or a new holder, a new worker or resuming the project) resets the count; every wake for someone else's change counts, scheduled check-ins count when no worker is running, and failed dispatches count. After a report, someone else's change gets the holder one more wake before it is reported again.
+- Task cards show the project context and the task description in full (both are limited to 8,000 characters when written). They were cut at 3,000 and 4,000 characters, which hid the user's later directions at the end of a long context.
+- The coordination skill asks both managers to find and fix what blocks them within their authority before bringing it to the user, with the cause; to check that the other manager's session actually ran before writing to it again; to check facts before stating them; and to write each note once, on the task it concerns. Engineering has a worker describe any image it is given before working from it, and starts servers that must outlive OpenClaw's 30-minute background limit with `timeoutSeconds: 0`.
 - The documentation header links to the repository beside search.
 - The documentation's native version selector offers main and genuine release snapshots starting at v2026.10.6. Pages builds retain all release documentation from that baseline, with existing current-page URLs redirecting to main.
 

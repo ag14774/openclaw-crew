@@ -10,15 +10,15 @@ Administrative methods **`jarvis-gilfoyle.board.call`** and **`jarvis-gilfoyle.b
 
 ## When work stops
 
-| Symptom                          | Inspect and next step                                                                                                                                                           |
-| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Board unavailable                | Check the reported `statePath` error, absolute path, host access and schema compatibility. Do not replace or migrate data by guesswork.                                         |
-| Task is quiet                    | Check holder, project state, next check-in, live turn/worker state and stall notes. User-held tasks are intentionally not woken; paused projects are not scanned for wakes.     |
-| Task is stalled                  | Read the latest notes and determine what is blocking it. A meaningful task update resets the stall; repeating a private reply without changing the task does not make progress. |
-| Handover refused as stale        | Use `show` again in the current turn, read the newer note and decide again.                                                                                                     |
-| Worker cannot start              | Check active/open state, configured agent/profile/runtime and the shared worker limit. Host runtime availability and tool permissions remain external.                          |
-| Task cannot be marked done       | Its workers must finish first. Pausing a project does not stop them.                                                                                                            |
-| Scan cannot see manager sessions | Inspect `lastError` and Gateway/plugin logs for companion/session failures. An unseen session is not evidence it is idle.                                                       |
+| Symptom                          | Inspect and next step                                                                                                                                                                                               |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Board unavailable                | Check the reported `statePath` error, absolute path, host access and schema compatibility. Do not replace or migrate data by guesswork.                                                                             |
+| Task is quiet                    | Check holder, project state, next check-in, live turn/worker state and stall notes. User-held tasks are intentionally not woken; paused projects are not scanned for wakes.                                         |
+| Task is stalled                  | Read the latest notes and determine what is blocking it. The holder acting on the task resets the stall; anyone else's update wakes the holder once more, and a private reply without a task update does not count. |
+| Handover refused as stale        | Use `show` again in the current turn, read the newer note and decide again.                                                                                                                                         |
+| Worker cannot start              | Check active/open state, configured agent/profile/runtime and the shared worker limit. Host runtime availability and tool permissions remain external.                                                              |
+| Task cannot be marked done       | Its workers must finish first. Pausing a project does not stop them.                                                                                                                                                |
+| Scan cannot see manager sessions | Inspect `lastError` and Gateway/plugin logs for companion/session failures. An unseen session is not evidence it is idle.                                                                                           |
 
 The shared runtime and companion are replaced on plugin reload, or after the companion has given no answer for **five minutes**. Subsequent scans retry against the persistent board. This mechanism does not promise a five-minute end-to-end recovery time or replace monitoring of health and logs.
 

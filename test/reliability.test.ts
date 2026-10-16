@@ -320,11 +320,11 @@ test('reopening a task while its workers are being stopped prevents the stop', a
 });
 
 for (const poked of [false, true]) {
-  test(`failed ${poked ? 'poked' : 'scheduled'} wakes retain inactivity and retry at five-minute cadence`, async (t) => {
+  test(`failed ${poked ? 'poked' : 'scheduled'} wakes retry at five-minute cadence and count toward a stall`, async (t) => {
     const h = fixture(t);
     const id = h.add();
     h.store.run(
-      'UPDATE tasks SET poked=?,check_at=?,idle_wakes=2 WHERE id=?',
+      'UPDATE tasks SET poked=?,check_at=? WHERE id=?',
       poked ? h.now() : null,
       h.now(),
       id,
@@ -333,25 +333,17 @@ for (const poked of [false, true]) {
       if (method === 'agent') throw Error('dispatch offline');
       return next();
     };
-    for (let i = 0; i < 5; i++) {
+    for (let i = 1; i <= 3; i++) {
       await h.runtime.tick();
       assert.match(h.runtime.health.lastError, /dispatch offline/);
-      assert.equal(h.store.task(id).idle_wakes, 2);
+      assert.equal(h.store.task(id).idle_wakes, i);
       assert.equal(h.store.task(id).poked, poked ? 1_000_000_000 : null);
-      assert.equal(h.store.task(id).stalled, null);
       const tries = h.native.calls.filter(([m]) => m === 'agent').length;
       h.advance(MINUTE);
       await h.runtime.tick();
       assert.equal(h.native.calls.filter(([m]) => m === 'agent').length, tries);
       h.advance(4 * MINUTE);
     }
-    h.native.hook = null;
-    assert.deepEqual((await h.runtime.tick()).woken, [id]);
-    assert.equal(h.store.task(id).idle_wakes, 3);
-    assert.equal(h.store.task(id).poked, null);
-    h.session(taskSessionKey('engineering', h.store.task(id)), { hasActiveRun: false });
-    h.runtime.wakes.clear();
-    h.advance(60 * MINUTE);
     assert.deepEqual((await h.runtime.tick()).stalled, [id]);
   });
 }

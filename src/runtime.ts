@@ -540,11 +540,15 @@ export class BoardRuntime {
     // Someone else's change asks the holder to look; the holder's own action answers
     // an outstanding poke.
     const poke = ROLES.includes(newHolder) && newHolder !== caller.role;
+    // Only the holder's own action, or a new holder, answers the wakes it was sent.
+    // Anyone else's change to a stalled task gets the holder one more wake before the
+    // stall is reported again.
+    const acted = caller.role === task.holder || handover || closing || reopening;
     const outbox = this.store.tx(() => {
       if (note) this.store.note(task.id, caller.role, note);
       this.store.run(
         `UPDATE tasks SET status=?,holder=?,plan=COALESCE(?,plan),poked=CASE WHEN ? THEN ? ELSE NULL END,woken=NULL,check_at=?,
-           idle_wakes=0,stalled=NULL,cleaned=CASE WHEN ? THEN NULL ELSE cleaned END,updated=? WHERE id=?`,
+           idle_wakes=CASE WHEN ? THEN 0 WHEN stalled IS NOT NULL THEN ? ELSE idle_wakes END,stalled=NULL,cleaned=CASE WHEN ? THEN NULL ELSE cleaned END,updated=? WHERE id=?`,
         closing ? status : 'open',
         newHolder,
         plan ?? null,
@@ -555,6 +559,8 @@ export class BoardRuntime {
             ? now + WAKE_RETRY_MINUTES * MINUTE
             : null
           : now + (checkIn ?? CHECK_IN_MINUTES) * MINUTE,
+        acted ? 1 : 0,
+        STALL_WAKES - 1,
         reopening ? 1 : 0,
         now,
         task.id,
@@ -1136,10 +1142,10 @@ export class BoardRuntime {
     const notes = this.store.notes(task.id, 15);
     return [
       `Project: ${project.name} (project ${project.id}), ${project.state}. Project chat: ${chatLabel(project.route)}.`,
-      ...(project.context ? [`Project context:\n${clip(project.context, 3000)}`] : []),
+      ...(project.context ? [`Project context:\n${project.context}`] : []),
       `Task #${task.id}: ${task.title}`,
       `Status: ${task.status}${task.status === 'open' ? `, waiting on ${task.holder === you ? `you (${you})` : task.holder}` : ''}. Created by ${task.created_by}.`,
-      ...(task.body ? [`Description:\n${clip(task.body, 4000)}`] : []),
+      ...(task.body ? [`Description:\n${task.body}`] : []),
       ...(task.plan ? [`Plan:\n${task.plan}`] : []),
       ...(notes.length
         ? [
@@ -1380,7 +1386,7 @@ export class BoardRuntime {
         workers = task.workers.length;
       }
       if (!this.taskUnchanged(task, lastNote)) continue;
-      if (!poked && !workers && task.idle_wakes >= STALL_WAKES) {
+      if (task.idle_wakes >= STALL_WAKES) {
         await this.reportStall(task);
         summary.stalled.push(task.id);
         continue;
@@ -1460,10 +1466,11 @@ export class BoardRuntime {
         if (!started) throw error;
       }
     } catch (error) {
-      // A wake that did not happen keeps its poke and idle count and is tried again later.
+      // A wake that did not happen keeps its poke and is tried again later; it counts as
+      // unanswered, so a holder who cannot be reached is reported like one who does not act.
       this.wakes.delete(key);
       this.store.run(
-        'UPDATE tasks SET woken=?,check_at=? WHERE id=?',
+        'UPDATE tasks SET woken=?,check_at=?,idle_wakes=idle_wakes+1 WHERE id=?',
         now,
         now + WAKE_RETRY_MINUTES * MINUTE,
         task.id,
@@ -1479,7 +1486,7 @@ export class BoardRuntime {
         'UPDATE tasks SET woken=?,check_at=?,idle_wakes=idle_wakes+?,poked=NULL WHERE id=?',
         now,
         now + CHECK_IN_MINUTES * MINUTE,
-        workers ? 0 : 1,
+        poked || !workers ? 1 : 0,
         task.id,
       );
     return true;
@@ -1488,13 +1495,13 @@ export class BoardRuntime {
     const project = this.store.project(task.project);
     const last = this.store.notes(task.id, 1)[0];
     const who = this.agentName(task.holder);
-    const message = `${project.name}: task #${task.id} "${task.title}" is waiting on ${who} and nothing has changed after ${STALL_WAKES} check-ins.${last ? ` Last note (${last.author}): ${clip(last.text, 500)}` : ''}`;
+    const message = `${project.name}: task #${task.id} "${task.title}" is waiting on ${who}, whose wake-ups have gone unanswered or could not be delivered.${last ? ` Last note (${last.author}): ${clip(last.text, 500)}` : ''}`;
     const id = this.store.tx(() => {
       this.store.run('UPDATE tasks SET stalled=? WHERE id=?', this.now(), task.id);
       this.store.note(
         task.id,
         'plugin',
-        `Stalled: no change after ${STALL_WAKES} check-ins; the user was told.`,
+        `Stalled: wake-ups went unanswered or undelivered; the user was told.`,
       );
       return this.store.enqueue(project.id, task.id, message);
     });
