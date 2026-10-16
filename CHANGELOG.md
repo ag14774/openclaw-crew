@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.10.8 - 2026-10-16
+
+- Requires OpenClaw 2026.10.4 (was 2026.9.8). The native checks pass against it. It fixes preflight compaction, which ignored the model fallback chain while the primary auth profile was cooling down and refused every turn of a long session.
+
 ## 2026.10.7 - 2026-10-16
 
 - A holder who does not act on its wake-ups is reported to the user even while the other manager keeps writing to the task. Before, anyone's note reset the count, a task with an outstanding change was never reported, and a wake that failed to dispatch did not count, so a manager whose session could not run went unreported for hours. Now the holder's own update (or a new holder, a new worker or resuming the project) resets the count; every wake for someone else's change counts, scheduled check-ins count when no worker is running, and failed dispatches count. After a report, someone else's change gets the holder one more wake before it is reported again.

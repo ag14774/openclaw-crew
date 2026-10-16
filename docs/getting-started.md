@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- OpenClaw **2026.9.8**, the version pinned by this repository.
+- OpenClaw **2026.10.4**, the version pinned by this repository.
 - Node.js with `node:sqlite`: **`>=24.16.0 <25 || >=26.1.0`**. Repository CI uses **26.8.1**.
 - Three distinct configured OpenClaw agents: product, engineering and worker.
 - A working user-message channel and an owner direct chat with the product manager for fallback delivery.
