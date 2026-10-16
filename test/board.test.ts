@@ -495,14 +495,39 @@ test('a holder who does nothing is reported to the user once, and a change reset
   assert.deepEqual(stall.stalled, [task]);
   assert.match(
     h.native.sent.at(-1).message,
-    /waiting on Gilfoyle and nothing has changed after 3 check-ins/,
+    /waiting on Gilfoyle, who has not acted on the last 3 wake-ups/,
   );
   h.advance(3 * 60 * MINUTE);
   assert.deepEqual(await h.tick().then((s) => [s.woken, s.stalled]), [[], []]);
   assert.equal(h.native.sent.length, 1);
-  // Anyone touching the task clears the stall and wakes the holder.
+  // Someone else's note clears the stall and wakes the holder once more.
   await h.call('main', JARVIS_DM, { operation: 'update_task', task, note: 'Any news?' });
   assert.deepEqual((await h.tick()).woken, [task]);
+  h.endAllRuns();
+  h.advance(61 * MINUTE);
+  assert.deepEqual((await h.tick()).stalled, [task]);
+  assert.equal(h.native.sent.length, 2);
+});
+
+test('notes from the other manager do not hide a holder who never acts', async () => {
+  const h = await harness();
+  await project(h);
+  const { task } = await h.call('main', JARVIS_DM, {
+    operation: 'add_task',
+    project: 'quote-desk',
+    title: 'Unanswered',
+  });
+  for (let i = 0; i < 3; i++) {
+    assert.deepEqual((await h.tick()).woken, [task]);
+    h.endAllRuns();
+    h.advance(5 * MINUTE);
+    await h.call('main', JARVIS_DM, { operation: 'update_task', task, note: `Ping ${i}` });
+  }
+  assert.deepEqual((await h.tick()).stalled, [task]);
+  // The holder's own action answers its wakes.
+  const gKey = key(h, 'engineering', task);
+  await h.call('gilfoyle', gKey, { operation: 'update_task', note: 'Back on it' });
+  assert.equal(h.runtime.store.task(task).idle_wakes, 0);
 });
 
 test('check_in_minutes schedules the next wake, and running workers do not count as idle', async () => {
