@@ -7,7 +7,7 @@
 <p align="center">Two manager agents, one shared board, clear handovers.</p>
 
 <p align="center">
-  <a href="package.json"><img src="https://img.shields.io/badge/OpenClaw-2026.9.8-ef6b57" alt="OpenClaw compatibility: 2026.9.8" /></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/OpenClaw-2026.10.4-ef6b57" alt="OpenClaw compatibility: 2026.10.4" /></a>
   <a href="package.json"><img src="https://img.shields.io/badge/Node.js-%3E%3D24.16.0%20%3C25%20%7C%7C%20%3E%3D26.1.0-43853d" alt="Node.js requirement: >=24.16.0 <25 or >=26.1.0" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-6b7280" alt="License: MIT" /></a>
 </p>
@@ -22,7 +22,7 @@ You talk to product in the project chat. Product records the request, engineerin
 
 ## Quick setup
 
-Use **OpenClaw `2026.9.8`** and Node.js with `node:sqlite`: **`>=24.16.0 <25 || >=26.1.0`** ([CI](https://github.com/ag14774/openclaw-jarvis-gilfoyle/blob/main/.github/workflows/ci.yml) uses `26.8.1`). Install a pinned release from ClawHub; the [releases](https://github.com/ag14774/openclaw-jarvis-gilfoyle/releases) list the versions:
+Use **OpenClaw `2026.10.4`** and Node.js with `node:sqlite`: **`>=24.16.0 <25 || >=26.1.0`** ([CI](https://github.com/ag14774/openclaw-jarvis-gilfoyle/blob/main/.github/workflows/ci.yml) uses `26.8.1`). Install a pinned release from ClawHub; the [releases](https://github.com/ag14774/openclaw-jarvis-gilfoyle/releases) list the versions:
 
 ```bash
 openclaw plugins install clawhub:openclaw-jarvis-gilfoyle@<version> --accept-capabilities
