@@ -129,16 +129,10 @@ test('asking the user sends the question, and the answer noted in the chat wakes
   h.native.sendStatus = () => 'sent';
   await h.call(tKey, { operation: 'update_task', note: 'Remind on Monday' });
   h.endAllRuns();
-  await h.call(LEAD_DM, {
-    operation: 'update_project',
-    project: 'quote-desk',
-    context: 'Repo: /src/quotes',
-  });
 
-  // In the project chat the lead sees the project, its context and the waiting question.
+  // In the project chat the lead sees the project and the waiting question.
   const context = (await h.userMessage(LEAD_GROUP, 'telegram:-200')).prependContext;
   assert.match(context, /also used as the project chat for "Quote Desk"/);
-  assert.match(context, /Project context:\nRepo: \/src\/quotes/);
   assert.match(
     context,
     /Waiting on the user: Quote Desk task #\d+ "Pricing page" — last message they received \([^)]+\): Should the pricing page show monthly or yearly prices\? — latest internal note \([^)]+\), not sent to them: Remind on Monday/,

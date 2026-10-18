@@ -1050,7 +1050,6 @@ export class BoardRuntime {
       if (project.route?.conversationRef === route.conversationRef)
         lines.push(
           `This chat is also used as the project chat for "${project.name}" (project ${project.id}).`,
-          ...(project.context ? [`Project context:\n${project.context}`] : []),
         );
       for (const task of this.store.all(
         "SELECT * FROM tasks WHERE project=? AND status='waiting' ORDER BY id LIMIT 5",
