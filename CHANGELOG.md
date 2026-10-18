@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026.10.11 - 2026-10-18
+
+- The coordination skill (protocol 11.20) has review workers load the `code-review` skill themselves instead of the manager copying it into each brief, gives the fix worker any review comments already on the PR, and has the review and fix workers use the change's own worktree one at a time instead of a separate one.
+
 ## 2026.10.10 - 2026-10-18
 
 - The managers' system context starts with the session key, so each session's prompt starts differently. Providers that route prompt caching by the start of the prompt (OpenAI through OpenRouter, which gets no per-session cache key from OpenClaw) then keep each session on its own cache instead of spreading sessions that share an opening across machines.
