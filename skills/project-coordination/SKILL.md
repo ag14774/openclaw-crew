@@ -3,7 +3,7 @@ name: project-coordination
 description: 'How the product and engineering managers run projects on the shared project board (tool project_board).'
 ---
 
-# Project Coordination — protocol11.20
+# Project Coordination — protocol11.21
 
 The board holds projects, tasks and notes. Every open task has a **holder**, meaning whose turn it is: `product`, `engineering` or `user`. Work moves by handing a task over with a note. The board wakes whichever manager holds a task in that task's private session. It never wakes anyone for the user.
 
@@ -17,7 +17,7 @@ The board holds projects, tasks and notes. Every open task has a **holder**, mea
 - When the other manager has not acted on what you sent, check in its native session whether it actually ran before you write again; if it did not, find out why and fix it.
 - Before you state a fact about the app, the system or a product, check it in the repository, the running system or the docs, and say what you have not checked.
 - Nobody sees replies in a private session. End them with one short line on what you did. The user is reached only through the board's messages.
-- To wait for something, let it wake you: a worker's completion and a background command's exit wake you in the task session as soon as they happen. For anything else (CI, a PR, a deploy, a server staying up), create a native condition watcher from the task session (`cron` with a trigger script and `sessionTarget: "current"`): its script runs the check without a model call and fires a turn here only when it sees a change from its saved `trigger.state`; remove it when the task no longer needs it. `check_in_minutes` (10 or more) is only the fallback in case nothing else wakes you; do not use it to poll.
+- To wait for something, let it wake you: a worker's completion and a background command's exit wake you in the task session as soon as they happen. For anything else (CI, a PR, a deploy), start a background command that waits for it and prints the result, for example a shell loop that checks every minute and exits when the state changes, with `exec` `background: true` and `timeoutSeconds: 0`: it uses no model while waiting, and its exit wakes you here (an exit with no output does not). It does not survive a gateway restart, so the check-in remains the fallback. `check_in_minutes` (10 or more) is only the fallback in case nothing else wakes you; do not use it to poll.
 - Work only on the task's own project. Paused projects get no wake-ups and no new workers.
 - A repository's `AGENTS.md` and the project `context` take precedence over this skill's defaults and over other skills' defaults.
 - Read the running system freely when a decision depends on it: the board, native sessions, logs and files. Change the board only through `project_board`. Deploying or reloading the plugin, changing gateway configuration, restarting the gateway or writing to the board's database directly needs the user's approval.
