@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.10.9 - 2026-10-18
+
+- `check_in_minutes` accepts 10 to 10080 (was 1 to 10080). Check-ins are the fallback wake-up; worker completions and command exits still wake the holder at once.
+- The coordination skill (protocol 11.18) asks managers to let events wake them instead of polling: worker completions and command exits already do, and for anything else (CI, a PR, a server) a native condition watcher runs its check without a model call and starts a turn only when the result changes. A full worker limit is waited out with a 10-minute check-in.
+
 ## 2026.10.8 - 2026-10-16
 
 - Requires OpenClaw 2026.10.4 (was 2026.9.8). The native checks pass against it. It fixes preflight compaction, which ignored the model fallback chain while the primary auth profile was cooling down and refused every turn of a long session.

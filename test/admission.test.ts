@@ -131,7 +131,7 @@ test('a full limit is waited out with ordinary short check-ins, without stalling
     const action = await h.call('gilfoyle', keys[1], {
       operation: 'update_task',
       note: 'Waiting for a free worker; checking again shortly.',
-      check_in_minutes: 5,
+      check_in_minutes: 10,
     });
     assert(!action.error, action.error);
     const row = h.runtime.store.task(tasks[1]);
@@ -140,7 +140,7 @@ test('a full limit is waited out with ordinary short check-ins, without stalling
       ['open', 'engineering', 0, null],
     );
     h.endAllRuns();
-    h.advance(5 * MINUTE);
+    h.advance(10 * MINUTE);
     await h.tick();
     assert.equal(h.runtime.store.task(tasks[1]).stalled, null);
   }

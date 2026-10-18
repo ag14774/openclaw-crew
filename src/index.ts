@@ -93,7 +93,8 @@ const parameters = {
     },
     check_in_minutes: {
       type: 'integer',
-      description: 'update_task: when the holder should be woken to look again (default 60).',
+      description:
+        'update_task: fallback wake-up in minutes, 10 to 10080 (default 60). Worker completions and other events wake you sooner.',
     },
     plan: {
       type: 'string',

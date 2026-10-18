@@ -519,8 +519,8 @@ export class BoardRuntime {
     if (input.check_in_minutes !== undefined) {
       checkIn = Number(input.check_in_minutes);
       assert(
-        Number.isInteger(checkIn) && checkIn >= 1 && checkIn <= 10080,
-        'check_in_minutes is 1 to 10080',
+        Number.isInteger(checkIn) && checkIn >= 10 && checkIn <= 10080,
+        'check_in_minutes is 10 to 10080',
       );
     }
     if (status === 'done') {

@@ -25,7 +25,7 @@ Both managers use one tool, `project_board`, with an `operation` and its fields.
 | `update_task`    | `note`, handover (`holder`), close or reopen (`status`), `message` with optional `attachments`, `check_in_minutes`, `plan`.                                 |
 | `notify`         | Product only. `message` to the user in the project chat, with optional `attachments`.                                                                       |
 
-`check_in_minutes` accepts 1–10080; an update without it schedules the next check-in for 60 minutes. `attachments` travel with a message, not on their own. `plan` is the task's working plan, free text up to 4,000 characters that the board never interprets. Each `plan` replaces the previous one, an empty one clears it, and it is shown at the top of the task card and by `show`.
+`check_in_minutes` accepts 10–10080; an update without it schedules the next check-in for 60 minutes. `attachments` travel with a message, not on their own. `plan` is the task's working plan, free text up to 4,000 characters that the board never interprets. Each `plan` replaces the previous one, an empty one clears it, and it is shown at the top of the task card and by `show`.
 
 ## Scheduling and model choice
 
