@@ -100,7 +100,7 @@ test('a launch whose completion never arrives stops counting after 16 minutes', 
   assert((await before(ctx(1))).params);
 });
 
-test('only running workers that the engineering manager launched count', async (t) => {
+test('only running workers launched from task sessions count', async (t) => {
   const { h, tasks, keys, ctx, before } = await fixture(t);
   const worker = h.native.session('agent:opencode:acp:elsewhere');
   // Launched from a task that has since been cancelled: it still runs, so it counts.
@@ -113,6 +113,8 @@ test('only running workers that the engineering manager launched count', async (
   Object.assign(worker, { hasActiveRun: true, spawnedBy: keys[2] });
   assert.match((await before(ctx(0))).blockReason, /limit 1/);
   worker.spawnedBy = taskSessionKey('product', h.runtime.store.task(tasks[0]));
+  assert.match((await before(ctx(0))).blockReason, /limit 1/);
+  worker.spawnedBy = 'agent:main:telegram:direct:1';
   assert((await before(ctx(0))).params);
 });
 
@@ -131,7 +133,7 @@ test('a full limit is waited out with ordinary short check-ins, without stalling
     const action = await h.call('gilfoyle', keys[1], {
       operation: 'update_task',
       note: 'Waiting for a free worker; checking again shortly.',
-      check_in_minutes: 5,
+      check_in_minutes: 10,
     });
     assert(!action.error, action.error);
     const row = h.runtime.store.task(tasks[1]);
@@ -140,7 +142,7 @@ test('a full limit is waited out with ordinary short check-ins, without stalling
       ['open', 'engineering', 0, null],
     );
     h.endAllRuns();
-    h.advance(5 * MINUTE);
+    h.advance(10 * MINUTE);
     await h.tick();
     assert.equal(h.runtime.store.task(tasks[1]).stalled, null);
   }

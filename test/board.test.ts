@@ -566,6 +566,26 @@ test('check_in_minutes schedules the next wake, and running workers do not count
   assert.equal(h.runtime.store.task(task).idle_wakes, before + 1);
 });
 
+test('a task the product manager keeps for itself wakes it at once, and its workers are recorded', async () => {
+  const h = await harness();
+  await project(h);
+  const { task } = await h.call('main', JARVIS_DM, {
+    operation: 'add_task',
+    project: 'quote-desk',
+    title: 'Fix totals',
+    holder: 'product',
+  });
+  assert.deepEqual((await h.tick()).woken, [task]);
+  const jKey = key(h, 'product', task);
+  assert.equal(h.native.runs.at(-1).sessionKey, jKey);
+  const spawned = await h.spawn(jKey, { agentId: 'opencode', model: 'sol-low', task: 'Fix' });
+  assert.equal(spawned.params.model, 'openai/gpt-5.6-sol');
+  assert.deepEqual(
+    h.runtime.store.task(task).workers.map((w) => w.key),
+    [spawned.childSessionKey],
+  );
+});
+
 test('the plan is kept on the task, shown on its card, and replaced or cleared as a whole', async () => {
   const h = await harness();
   await project(h);

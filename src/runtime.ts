@@ -422,7 +422,7 @@ export class BoardRuntime {
         body,
         holder,
         caller.role,
-        holder === caller.role ? null : now,
+        now,
         now + CHECK_IN_MINUTES * MINUTE,
         now,
         now,
@@ -519,8 +519,8 @@ export class BoardRuntime {
     if (input.check_in_minutes !== undefined) {
       checkIn = Number(input.check_in_minutes);
       assert(
-        Number.isInteger(checkIn) && checkIn >= 1 && checkIn <= 10080,
-        'check_in_minutes is 1 to 10080',
+        Number.isInteger(checkIn) && checkIn >= 10 && checkIn <= 10080,
+        'check_in_minutes is 10 to 10080',
       );
     }
     if (status === 'done') {
@@ -924,7 +924,7 @@ export class BoardRuntime {
     }
     return live;
   }
-  // Workers the engineering manager launched from task sessions that are running now,
+  // Workers launched from task sessions that are running now,
   // whatever their task's status, plus ones recorded too recently for the list to show.
   async runningBoardWorkers() {
     const { workerAgentId } = topology();
@@ -937,10 +937,7 @@ export class BoardRuntime {
       });
       assert(Array.isArray(result?.sessions), 'Worker session list unavailable');
       for (const session of result.sessions)
-        if (
-          rowLive(session, this.now()) &&
-          parseTaskSession(session.spawnedBy)?.role === 'engineering'
-        )
+        if (rowLive(session, this.now()) && parseTaskSession(session.spawnedBy))
           running.add(session.key);
       if (!result.hasMore || !(result.nextOffset > offset)) break;
       offset = result.nextOffset;
@@ -1173,7 +1170,7 @@ export class BoardRuntime {
     if (task.workers.length)
       lines.push(`Workers spawned for this task: ${task.workers.map((w) => w.key).join(', ')}`);
     const { workerAgentId, workerProfiles } = topology();
-    if (you === 'engineering' && workerProfiles.length)
+    if (workerProfiles.length)
       lines.push(
         `Worker profiles (sessions_spawn with agentId "${workerAgentId}" and model set to a profile id): ${workerProfiles
           .map(
@@ -1185,7 +1182,7 @@ export class BoardRuntime {
     return lines.join('\n');
   }
   // Guards for tools used inside private task sessions. Everywhere else: nothing.
-  // `launching` counts the engineering manager's earlier worker launches still in progress.
+  // `launching` counts earlier worker launches still in progress.
   async beforeToolCall(event, ctx, launching = 0) {
     const scope = parseTaskSession(ctx?.sessionKey);
     if (!scope) {
@@ -1241,15 +1238,12 @@ export class BoardRuntime {
         block: true,
         blockReason: `Set model to a worker profile id: ${workerProfiles.map((p) => p.id).join(', ')}.`,
       };
-    // The limit covers the workers the engineering manager launches directly.
-    if (scope.role === 'engineering') {
-      const running = (await this.runningBoardWorkers()) + launching;
-      if (running >= workerLimit)
-        return {
-          block: true,
-          blockReason: `${running} workers are already running or starting (limit ${workerLimit}); wait for one to finish.`,
-        };
-    }
+    const running = (await this.runningBoardWorkers()) + launching;
+    if (running >= workerLimit)
+      return {
+        block: true,
+        blockReason: `${running} workers are already running or starting (limit ${workerLimit}); wait for one to finish.`,
+      };
     return {
       params: {
         ...params,

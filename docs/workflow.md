@@ -14,7 +14,7 @@ These are the bundled skill's working practices. The board mechanically requires
 
 Use `notify` for useful progress updates. Notes hold status and evidence; project context holds durable facts, not a running log. One task represents one requested piece of work, not every message or supervision step.
 
-The scan runs every **60 seconds** by default. It wakes the manager holding a changed task or a due check-in, normally **60 minutes**, without interrupting a session reported as mid-turn. A private reply ends the turn; saying what will happen next does not continue execution. Managers should act, hand over, or explicitly record what they are waiting for and set `check_in_minutes` when needed.
+The scan runs every **60 seconds** by default. It wakes the manager holding a changed task or a due check-in, normally **60 minutes**, without interrupting a session reported as mid-turn. A private reply ends the turn; saying what will happen next does not continue execution. Managers should act, hand over, or explicitly record what they are waiting for. Worker completions, command exits and native condition watchers wake them as soon as something happens; `check_in_minutes` (10 minutes or more) is the fallback.
 
 Tasks held by the **user** get no automatic wake-ups. When the holder has not acted on three wake-ups, or could not be woken, the board queues a stall notice and stops automatic wakes; the holder acting resets it, and anyone else's update wakes the holder once more. Check [operations](operations.md) if work goes quiet.
 
