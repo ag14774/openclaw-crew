@@ -26,7 +26,7 @@ You need what was asked and why, the diff range (base and head), the repository'
 
 6. For each finding give the file and line, what is wrong, why it matters here, and the smallest fix. Removing code or a whole mechanism counts and is often the best fix. When several findings come from one mechanism, say so and suggest a simpler design rather than patches.
 7. Size: lines added and removed, and whether that is proportionate to what was asked.
-8. Do the review yourself; do not start other reviewers or sub-agents.
+8. When the `interrogate` skill is available, use it for a second model's view and judge every finding by the rules above; otherwise do the review yourself. Start no reviewers or sub-agents beyond that.
 
 Report in about 400 words or fewer:
 

@@ -422,7 +422,7 @@ export class BoardRuntime {
         body,
         holder,
         caller.role,
-        holder === caller.role ? null : now,
+        now,
         now + CHECK_IN_MINUTES * MINUTE,
         now,
         now,
