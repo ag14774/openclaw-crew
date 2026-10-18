@@ -375,7 +375,14 @@ export default {
     on('before_prompt_build', async (_event, ctx) => {
       const agentId = agentOf(ctx);
       if (!isManagerAgent(agentId)) return;
-      const role = projectRoleContext(currentConfig(api), agentId);
+      // A per-session first line gives each session its own prompt-cache routing on
+      // providers that route by the start of the prompt (OpenAI through OpenRouter).
+      const role = [
+        ctx.sessionKey ? `Session ${ctx.sessionKey}.` : '',
+        projectRoleContext(currentConfig(api), agentId),
+      ]
+        .filter(Boolean)
+        .join('\n');
       let r;
       try {
         r = get();

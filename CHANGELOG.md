@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.10.10 - 2026-10-18
+
+- The managers' system context starts with the session key, so each session's prompt starts differently. Providers that route prompt caching by the start of the prompt (OpenAI through OpenRouter, which gets no per-session cache key from OpenClaw) then keep each session on its own cache instead of spreading sessions that share an opening across machines.
+- The coordination skill (protocol 11.19) says how to split a change too large for one worker: a foundation task first, then parallel tasks that each merge on their own, each with one owner.
+
 ## 2026.10.9 - 2026-10-18
 
 - `check_in_minutes` accepts 10 to 10080 (was 1 to 10080). Check-ins are the fallback wake-up; worker completions and command exits still wake the holder at once.

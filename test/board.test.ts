@@ -52,6 +52,7 @@ test('a request goes from the user to engineering and back, and the user hears t
   assert.match(card.prependContext, /waiting on you \(engineering\)/);
   assert.match(card.prependContext, /sol-low = openai\/gpt-5\.6-sol/);
   assert.match(card.prependSystemContext, /product manager is Jarvis \(agent id main\)/);
+  assert.ok(card.prependSystemContext.startsWith(`Session ${gKey}.\n`));
 
   // A running session is not woken again.
   h.advance(2 * MINUTE);
