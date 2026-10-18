@@ -4,6 +4,7 @@
 
 - `check_in_minutes` accepts 10 to 10080 (was 1 to 10080). Check-ins are the fallback wake-up; worker completions and command exits still wake the holder at once.
 - A new task wakes its holder at once, including a task the product manager keeps for itself (before, only tasks for the other manager did).
+- Workers started from any task session count towards the worker limit and see the worker profiles on the task card (before, only the engineering manager's did).
 - The coordination skill (protocol 11.18) asks managers to let events wake them instead of polling: worker completions and command exits already do, and for anything else (CI, a PR, a server) a native condition watcher runs its check without a model call and starts a turn only when the result changes. A full worker limit is waited out with a 10-minute check-in. Engineering gives each change to one owner worker, which builds all of it in one branch, instead of splitting it between workers and merging their branches; managers no longer read diffs or run tests themselves but decide from a separate review worker's verdict, the PR's size and CI; worker briefs ask workers to load the `engineering-principles` skill. When the project context says so, the product manager runs a project's engineering itself. The code-review skill uses `interrogate` for a second model's view when it is available.
 
 ## 2026.10.8 - 2026-10-16

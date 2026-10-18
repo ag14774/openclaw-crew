@@ -410,8 +410,7 @@ export default {
     });
     on('before_tool_call', (event, ctx) => {
       if (!isManagerAgent(agentOf(ctx)) || !isPrivateSession(ctx?.sessionKey)) return;
-      if (event?.toolName !== 'sessions_spawn' || agentOf(ctx) !== cfg.engineeringAgentId)
-        return get().beforeToolCall(event, ctx);
+      if (event?.toolName !== 'sessions_spawn') return get().beforeToolCall(event, ctx);
       // Earlier launches still in progress count towards the limit. This one is added
       // before the count can await, so parallel launches see each other.
       const now = launchNow();
