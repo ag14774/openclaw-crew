@@ -324,6 +324,7 @@ export class BoardRuntime {
     return { project: { ...this.projectView(project), context: project.context } };
   }
   createProject(caller, input) {
+    assert(!caller.task, 'Create projects from a conversation, not from a task session');
     const name = line(input.name, 120, 'name');
     const context = optional(input.context, 8000, 'context') ?? '';
     const base = slug(name);
@@ -532,7 +533,7 @@ export class BoardRuntime {
   }
   async notify(caller, input) {
     const project = this.scopeProject(caller, input.project);
-    const message = text(input.message ?? input.text, 4000, 'message');
+    const message = text(input.message, 4000, 'message');
     const files = attachments(input.attachments);
     let taskId = null;
     if (input.task !== undefined || caller.task) {
@@ -1016,7 +1017,7 @@ export class BoardRuntime {
     return this.store.notes(taskId, 1)[0];
   }
   // Whether anyone acted on the task since it was read. The scan's own bookkeeping
-  // (woken, check_at, idle_wakes, poked) does not count.
+  // (check_at, idle_wakes, poked) does not count.
   taskUnchanged(task, lastNote) {
     const current = this.store.task(task.id);
     return (
@@ -1062,7 +1063,7 @@ export class BoardRuntime {
           task.id,
         );
         lines.push(
-          `Waiting on the user: ${project.name} task #${task.id} "${task.title}"${sent ? ` — last message they received (${when(sent.created)}): ${clip(sent.text, 600)}` : ''}${last && !(sent && sent.created >= last.created) ? ` — latest internal note (${when(last.created)}), not sent to them: ${clip(last.text, 300)}` : ''}`,
+          `Waiting on the user: ${project.name} task #${task.id} "${task.title}"${sent ? ` — last message they received (${when(sent.created)}): ${clip(sent.text, 600)}` : ''}${last && !(sent && sent.created >= last.created) ? ` — latest note (${when(last.created)}): ${clip(last.text, 300)}` : ''}`,
         );
       }
     }
@@ -1103,15 +1104,14 @@ export class BoardRuntime {
     if (task.workers.length)
       lines.push(`Workers spawned for this task: ${task.workers.map((w) => w.key).join(', ')}`);
     const { workerAgentId, workerProfiles } = topology();
-    if (workerProfiles.length)
-      lines.push(
-        `Worker profiles (sessions_spawn with agentId "${workerAgentId}" and model set to a profile id): ${workerProfiles
-          .map(
-            (p) =>
-              `${p.id} = ${p.model}, thinking ${p.thinking ?? 'default'}${p.description ? ` — ${p.description}` : ''}`,
-          )
-          .join('; ')}`,
-      );
+    lines.push(
+      `Worker profiles (sessions_spawn with agentId "${workerAgentId}" and model set to a profile id): ${workerProfiles
+        .map(
+          (p) =>
+            `${p.id} = ${p.model}, thinking ${p.thinking ?? 'default'}${p.description ? ` — ${p.description}` : ''}`,
+        )
+        .join('; ')}`,
+    );
     return lines.join('\n');
   }
   // Guards for tools used inside private task sessions. Everywhere else: nothing.
@@ -1159,7 +1159,7 @@ export class BoardRuntime {
         blockReason: `Project ${project.name} is ${project.state}; no new workers.`,
       };
     const { workerAgentId, workerProfiles, workerRuntime, workerLimit } = topology();
-    if (spawnAgentId(params) !== workerAgentId || !workerProfiles.length) return undefined;
+    if (spawnAgentId(params) !== workerAgentId) return undefined;
     const profile =
       workerProfiles.find((p) => p.id === params.model) ??
       workerProfiles.find(

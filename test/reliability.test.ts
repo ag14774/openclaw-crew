@@ -542,7 +542,7 @@ test('foreign schema-zero databases are refused read-only and rejected handles c
     const path = join(dir, `empty-${existing}.sqlite`);
     if (existing) new DatabaseSync(path).close();
     const store = new Store(path);
-    assert.equal(store.get('PRAGMA user_version').user_version, 20);
+    assert.equal(store.get('PRAGMA user_version').user_version, 1);
     assert.equal(statSync(path).mode & 0o777, 0o600);
     store.close();
   }

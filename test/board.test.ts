@@ -135,7 +135,7 @@ test('asking the user sends the question, and the answer noted in the chat wakes
   assert.match(context, /also used as the project chat for "Quote Desk"/);
   assert.match(
     context,
-    /Waiting on the user: Quote Desk task #\d+ "Pricing page" — last message they received \([^)]+\): Should the pricing page show monthly or yearly prices\? — latest internal note \([^)]+\), not sent to them: Remind on Monday/,
+    /Waiting on the user: Quote Desk task #\d+ "Pricing page" — last message they received \([^)]+\): Should the pricing page show monthly or yearly prices\? — latest note \([^)]+\): Remind on Monday/,
   );
   assert.doesNotMatch(context, /Undelivered reminder|billing period/);
 
@@ -181,10 +181,7 @@ test('in the project chat the reply is the message; elsewhere a message is requi
   // With no board message, the chat context labels the note as internal.
   h.endTurn(LEAD_GROUP);
   const context = await h.userMessage(LEAD_GROUP, 'telegram:-200');
-  assert.match(
-    context.prependContext,
-    /"Colour" — latest internal note \([^)]+\), not sent to them: Asked/,
-  );
+  assert.match(context.prependContext, /"Colour" — latest note \([^)]+\): Asked/);
 
   const other = await addTask(h, 'Font');
   await h.userMessage(LEAD_DM, 'telegram:100');
@@ -298,6 +295,10 @@ test('task sessions stay in their project, and closed tasks change only by reope
   assert.deepEqual(
     (await h.call(aKey, { operation: 'list' })).projects.map((p) => p.id),
     ['alpha'],
+  );
+  assert.match(
+    (await h.call(aKey, { operation: 'create_project', name: 'Gamma' })).error,
+    /not from a task session/,
   );
   assert.equal(h.tool('opencode', 'agent:opencode:x'), null);
 
@@ -847,7 +848,7 @@ test('the board file persists across restarts and a database of another schema i
   const other = new DatabaseSync(foreign);
   other.exec('PRAGMA user_version=99');
   other.close();
-  assert.throws(() => new Store(foreign), /not a project board \(schema 99, expected 20\)/);
+  assert.throws(() => new Store(foreign), /not a project board \(schema 99, expected 1\)/);
   rmSync(dir, { recursive: true, force: true });
 });
 

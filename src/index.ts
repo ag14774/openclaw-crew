@@ -3,7 +3,7 @@ import { AsyncResource } from 'node:async_hooks';
 import { Store } from './store.js';
 import { BoardRuntime } from './runtime.js';
 import { Bridge } from './bridge.js';
-import { currentConfig, LEAD_CONTEXT, persona, PRIVATE_GUIDANCE } from './role-context.js';
+import { currentConfig, LEAD_CONTEXT, persona, PRIVATE_GUIDANCE } from './lead-context.js';
 import { configureTopology, isLead, isPrivateSession, topology } from './topology.js';
 
 const OPERATIONS = [

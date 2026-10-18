@@ -241,5 +241,5 @@ test('CLI validates arguments and verifies without gateway or runtime imports', 
     { encoding: 'utf8', cwd: root },
   );
   assert.equal(verify.status, 0, verify.stderr);
-  assert.equal(JSON.parse(verify.stdout).schema, 20);
+  assert.equal(JSON.parse(verify.stdout).schema, 1);
 });

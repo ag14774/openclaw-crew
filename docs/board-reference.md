@@ -68,7 +68,7 @@ Task sessions follow the model and thinking level selected in the project chat (
 
 ### Scope and failure behavior
 
-Outside the board tool and private task-session guards, the plugin adds only brief context to the lead's prompts: in every session, the session key and one line explaining that the project role adds to the usual role; in a project chat, also the project name, its context and the tasks waiting on the user, each with the last message the user received for it and any newer note, marked internal. Other agents and the lead's personal-assistant work are otherwise unaffected.
+Outside the board tool and private task-session guards, the plugin adds only brief context to the lead's prompts: in every session, the session key and a short note that project work adds to the lead's usual role; in a project chat, also which project the chat belongs to and the tasks waiting on the user, each with the last message the user received for it and any newer note. Other agents and the lead's personal-assistant work are otherwise unaffected.
 
 Hook errors are logged and ignored, except that a worker launch from a task session is refused while the running workers cannot be counted. The board is not a security sandbox or a substitute for host tool permissions. An unavailable board is reported by the tool and health; scans log failures. The shared runtime and companion are replaced on plugin reload, or after the companion has not answered for five minutes, and scans try again using the persistent board, keeping the launches still starting.
 
@@ -78,7 +78,7 @@ Required configuration is shown in [getting started](getting-started.md#configur
 
 | Setting                         | Default / constraint                                                                                                             |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `statePath`                     | Required absolute path to a new file or schema 20 board. `:memory:` is accepted for ephemeral use.                               |
+| `statePath`                     | Required absolute path to a new file or schema 1 board. `:memory:` is accepted for ephemeral use.                                |
 | `leadAgentId`, `worker.agentId` | Required, different OpenClaw agent IDs.                                                                                          |
 | `ownerChat`                     | Required `channel`, `accountId`, `to`; optional `threadId`. The owner's direct chat with the lead, used for fallback.            |
 | `worker.profiles`               | Required, 1–8 profiles with `id` and `model`; optional `thinking` and `description`.                                             |
@@ -93,7 +93,7 @@ Required configuration is shown in [getting started](getting-started.md#configur
 
 The entry's `enabled` switch and hook permissions are OpenClaw settings, separate from the plugin's `config.enabled`. The lead needs `project_board` permission; its other tools and the worker runtime remain host configuration.
 
-SQLite uses WAL, full synchronous writes and foreign keys. New parent directories use mode `0700`, and the database file is set to `0600`. The store accepts an empty schema-zero database or schema 20; nonempty schema-zero files and other versions are refused before board DDL, chmod or journal changes. Version 20 is not a comprehensive database-identity check, so always use a dedicated board file, never an unrelated database. See [backup and staged recovery](recovery.md) for the standalone operator utility and its separate verification boundary.
+SQLite uses WAL, full synchronous writes and foreign keys. New parent directories use mode `0700`, and the database file is set to `0600`. The store accepts an empty schema-zero database or schema 1; nonempty schema-zero files and other versions are refused before board DDL, chmod or journal changes. Version 20 is not a comprehensive database-identity check, so always use a dedicated board file, never an unrelated database. See [backup and staged recovery](recovery.md) for the standalone operator utility and its separate verification boundary.
 
 ## Operator methods
 

@@ -61,7 +61,7 @@ Add this entry to your OpenClaw configuration. All paths, agent IDs, chat destin
 }
 ```
 
-Use a dedicated **new database file** or an existing **schema 20 board** at the absolute `statePath`. The store's schema-version check does not prove a database belongs to this plugin: never use an unrelated database. `:memory:` is ephemeral and unsuitable for durable work.
+Use a dedicated **new database file** or an existing **schema 1 board** at the absolute `statePath`. The store's schema-version check does not prove a database belongs to this plugin: never use an unrelated database. `:memory:` is ephemeral and unsuitable for durable work.
 
 Grant `project_board` to the lead in its OpenClaw tool permissions. The bundled skills, [crew-lead](https://github.com/ag14774/openclaw-crew/blob/main/skills/crew-lead/SKILL.md) and [code-review](https://github.com/ag14774/openclaw-crew/blob/main/skills/code-review/SKILL.md), load for OpenClaw agents with the plugin; add them to any per-agent skill allowlist. Also make the code-review skill available to workers, which review and fix each change with it: link the installed copy into a skill folder the worker loads, for example `ln -s ~/.openclaw/extensions/crew/skills/code-review ~/.agents/skills/code-review`, which follows plugin upgrades, or install it with `npx skills add ag14774/openclaw-crew --skill code-review -g`. Without it, the lead copies the review rules into every review brief. Configure the worker's ACP runtime in OpenClaw when using `acp`; `subagent` is also supported. The plugin does not configure the agents, providers or channel for you.
 

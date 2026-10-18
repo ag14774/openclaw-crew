@@ -70,7 +70,7 @@ Add a `crew` entry to your OpenClaw configuration. Replace the database path, ag
 
 - **Permissions:** grant `project_board` to the lead. The bundled skills, [crew lead](skills/crew-lead/SKILL.md) and [code review](skills/code-review/SKILL.md), load for OpenClaw agents with the plugin; add them to any per-agent skill allowlist. Also make the code-review skill available to workers, which review and fix each change with it: link the installed copy into a skill folder the worker loads, for example `ln -s ~/.openclaw/extensions/crew/skills/code-review ~/.agents/skills/code-review`, which follows plugin upgrades, or install it with `npx skills add ag14774/openclaw-crew --skill code-review -g`. Without it, the lead copies the review rules into every review brief. Enable both hook permissions shown above: `allowConversationAccess` and `allowPromptInjection`.
 - **Workers:** configure the worker's ACP runtime in OpenClaw for `runtime: "acp"`; `"subagent"` is also supported.
-- **Storage:** use a dedicated new SQLite file or an existing **schema 20** board at the absolute `statePath`. Never use an unrelated database.
+- **Storage:** use a dedicated new SQLite file or an existing **schema 1** board at the absolute `statePath`. Never use an unrelated database.
 
 Restart the Gateway to load the plugin:
 

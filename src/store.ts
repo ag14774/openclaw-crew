@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 // The board: projects, tasks, their notes, and the notification outbox. An open task is the
 // lead's turn; a waiting one waits on the user.
-export const SCHEMA_VERSION = 20;
+export const SCHEMA_VERSION = 1;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS projects(
