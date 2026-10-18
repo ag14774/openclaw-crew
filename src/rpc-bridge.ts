@@ -2,10 +2,7 @@
 // operator just like the existing bounded native helpers. Never logs credentials.
 import { createInterface } from 'node:readline';
 import { callGatewayFromCli } from 'openclaw/plugin-sdk/gateway-runtime';
-import {
-  cleanupSessionLifecycleArtifacts,
-  getSessionEntry,
-} from 'openclaw/plugin-sdk/session-store-runtime';
+import { cleanupSessionLifecycleArtifacts } from 'openclaw/plugin-sdk/session-store-runtime';
 import { cleanupScope, companionMethodAllowed, companionScopes } from './bridge-methods.js';
 const lines = createInterface({ input: process.stdin });
 lines.on('line', async (line) => {
@@ -14,13 +11,10 @@ lines.on('line', async (line) => {
     const q = JSON.parse(line);
     id = q.id;
     let result;
-    if (q.method === 'jarvis-gilfoyle.session.cleanup') {
+    if (q.method === 'crew.session.cleanup') {
       const p = q.params,
         owned = cleanupScope(p);
       if (!owned) throw Error('Invalid owned cleanup scope');
-      const entry = getSessionEntry({ agentId: p.agentId, sessionKey: p.sessionKey });
-      if (entry && entry.sessionId !== p.expectedSessionId)
-        throw Error('Session generation changed before cleanup');
       const marker = JSON.stringify(`PROJECT TASK ${owned.scope}`).slice(1, -1);
       result = await cleanupSessionLifecycleArtifacts({
         agentId: p.agentId,

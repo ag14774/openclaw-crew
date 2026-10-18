@@ -1,4 +1,4 @@
-// The worker limit for the engineering manager's direct launches, through the real hooks.
+// The worker limit for launches from task sessions, through the real hooks.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { harness, MINUTE } from './support/harness.ts';
@@ -18,16 +18,16 @@ async function fixture(t, limit = 1) {
     },
   });
   t.after(() => h.runtime.store.close());
-  const call = (args) => h.call('main', 'agent:main:operator', args);
+  const call = (args) => h.call('agent:lead:operator', args);
   const project = (await call({ operation: 'create_project', name: 'Admission' })).project;
   const tasks = [];
   for (const title of ['A', 'B', 'C'])
     tasks.push((await call({ operation: 'add_task', project, title })).task);
-  const keys = tasks.map((id) => taskSessionKey('engineering', h.runtime.store.task(id)));
+  const keys = tasks.map((id) => taskSessionKey(h.runtime.store.task(id)));
   let calls = 0;
   // One tool call in a task session.
   const ctx = (i = 0) => ({
-    agentId: 'gilfoyle',
+    agentId: 'lead',
     sessionKey: keys[i],
     runId: 'parent-run',
     toolCallId: `call-${++calls}`,
@@ -101,20 +101,20 @@ test('a launch whose completion never arrives stops counting after 16 minutes', 
 });
 
 test('only running workers launched from task sessions count', async (t) => {
-  const { h, tasks, keys, ctx, before } = await fixture(t);
+  const { call, h, tasks, keys, ctx, before } = await fixture(t);
   const worker = h.native.session('agent:opencode:acp:elsewhere');
   // Launched from a task that has since been cancelled: it still runs, so it counts.
-  await h.call('main', 'agent:main:operator', {
+  await call({
     operation: 'update_task',
     task: tasks[2],
     status: 'cancelled',
     note: 'Stop',
+    message: 'Stopped.',
   });
   Object.assign(worker, { hasActiveRun: true, spawnedBy: keys[2] });
   assert.match((await before(ctx(0))).blockReason, /limit 1/);
-  worker.spawnedBy = taskSessionKey('product', h.runtime.store.task(tasks[0]));
-  assert.match((await before(ctx(0))).blockReason, /limit 1/);
-  worker.spawnedBy = 'agent:main:telegram:direct:1';
+  // A worker launched from a personal chat does not count.
+  worker.spawnedBy = 'agent:lead:telegram:direct:1';
   assert((await before(ctx(0))).params);
 });
 
@@ -130,17 +130,14 @@ test('a full limit is waited out with ordinary short check-ins, without stalling
   assert((await h.spawn(keys[0], params)).childSessionKey);
   for (let check = 0; check < 6; check++) {
     assert((await h.spawn(keys[1], params)).blocked);
-    const action = await h.call('gilfoyle', keys[1], {
+    const action = await h.call(keys[1], {
       operation: 'update_task',
       note: 'Waiting for a free worker; checking again shortly.',
       check_in_minutes: 10,
     });
     assert(!action.error, action.error);
     const row = h.runtime.store.task(tasks[1]);
-    assert.deepEqual(
-      [row.status, row.holder, row.idle_wakes, row.stalled],
-      ['open', 'engineering', 0, null],
-    );
+    assert.deepEqual([row.status, row.idle_wakes, row.stalled], ['open', 0, null]);
     h.endAllRuns();
     h.advance(10 * MINUTE);
     await h.tick();

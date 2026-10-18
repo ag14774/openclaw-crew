@@ -8,7 +8,7 @@ import { COMPANION_METHODS } from '../src/bridge-methods.ts';
 // Compatibility lane: every native method the companion calls exists in the pinned build.
 test(
   'companion methods exist in the pinned OpenClaw build',
-  { skip: process.env.JG_NATIVE_TEST !== '1' && 'set JG_NATIVE_TEST=1' },
+  { skip: process.env.CREW_NATIVE_TEST !== '1' && 'set CREW_NATIVE_TEST=1' },
   () => {
     const dist = dirname(fileURLToPath(import.meta.resolve('openclaw')));
     const names = new Set();
@@ -23,7 +23,7 @@ test(
 
 test(
   'the transcript writer the board uses exists in the pinned OpenClaw build',
-  { skip: process.env.JG_NATIVE_TEST !== '1' && 'set JG_NATIVE_TEST=1' },
+  { skip: process.env.CREW_NATIVE_TEST !== '1' && 'set CREW_NATIVE_TEST=1' },
   async () => {
     const sdk = await import('openclaw/plugin-sdk/session-transcript-runtime');
     assert.equal(typeof sdk.appendSessionTranscriptMessageByIdentity, 'function');
@@ -33,7 +33,7 @@ test(
 
 test(
   'the tool-free model call used for chat rewrites exists in the pinned OpenClaw build',
-  { skip: process.env.JG_NATIVE_TEST !== '1' && 'set JG_NATIVE_TEST=1' },
+  { skip: process.env.CREW_NATIVE_TEST !== '1' && 'set CREW_NATIVE_TEST=1' },
   () => {
     const dist = dirname(fileURLToPath(import.meta.resolve('openclaw')));
     const declared = readdirSync(dist).some(

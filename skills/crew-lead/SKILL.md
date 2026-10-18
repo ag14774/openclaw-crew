@@ -1,5 +1,5 @@
 ---
-name: project-coordination
+name: crew-lead
 description: 'How the product and engineering managers run projects on the shared project board (tool project_board).'
 ---
 

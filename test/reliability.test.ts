@@ -27,7 +27,13 @@ const route = (c, target = c) => ({
 const group = { ...route('a', 'original'), kind: 'group' };
 const owner = route('b', 'owner');
 const rebound = route('c', 'new');
-const caller = (role, session = role) => ({ role, session, task: null, source: null });
+// The lead calling from the project chat (where the reply is the message), or from a
+// task's own session.
+const caller = (session = 'chat', task = null) => ({
+  session,
+  task,
+  source: task ? null : { route: group },
+});
 const gate = () => {
   let enter, release;
   const entered = new Promise((resolve) => {
@@ -41,11 +47,7 @@ const gate = () => {
 
 // Every external effect is fake; RPC also asserts that SQLite never spans an await.
 function fixture(t, { path = ':memory:' } = {}) {
-  configureTopology({
-    productAgentId: 'product',
-    engineeringAgentId: 'engineering',
-    workerAgentId: 'worker',
-  });
+  configureTopology({ leadAgentId: 'lead', workerAgentId: 'worker' });
   let now = 1_000_000_000;
   const store = new Store(path, { now: () => now });
   t.after(() => store.close());
@@ -127,8 +129,7 @@ function fixture(t, { path = ':memory:' } = {}) {
     },
   });
   runtime.requestTick = () => {};
-  const add = (role = 'engineering') =>
-    runtime.addTask(caller('engineering'), { project: 'p', title: 'Work', holder: role }).task;
+  const add = () => runtime.addTask(caller(), { project: 'p', title: 'Work' }).task;
   const worker = (id, key = `agent:worker:${id}`) => {
     store.run(
       'UPDATE tasks SET workers=? WHERE id=?',
@@ -172,7 +173,7 @@ test('a cancellation made while a completion checks the workers wins', async (t)
   const h = fixture(t);
   const id = h.add();
   const g = holdRead(h, h.worker(id));
-  const done = h.runtime.updateTask(caller('product', 'earlier'), {
+  const done = h.runtime.updateTask(caller('earlier'), {
     task: id,
     status: 'done',
     note: 'Accepted',
@@ -180,7 +181,7 @@ test('a cancellation made while a completion checks the workers wins', async (t)
   });
   const rejected = assert.rejects(done, /changed.*while its workers were checked.*show/);
   await g.entered;
-  await h.runtime.updateTask(caller('product'), { task: id, status: 'cancelled', note: 'Stop' });
+  await h.runtime.updateTask(caller(), { task: id, status: 'cancelled', note: 'Stop' });
   const latest = h.store.task(id);
   g.release();
   await rejected;
@@ -193,10 +194,10 @@ test('a worker recorded while a completion checks the workers stops the completi
   const h = fixture(t);
   const id = h.add();
   const g = holdRead(h, h.worker(id));
-  const done = h.runtime.updateTask(caller('product'), { task: id, status: 'done', note: 'Ok' });
+  const done = h.runtime.updateTask(caller(), { task: id, status: 'done', note: 'Ok' });
   const rejected = assert.rejects(done, /changed.*while its workers were checked/);
   await g.entered;
-  h.runtime.recordWorker(taskSessionKey('engineering', h.store.task(id)), 'agent:worker:late');
+  h.runtime.recordWorker(taskSessionKey(h.store.task(id)), 'agent:worker:late');
   g.release();
   await rejected;
   assert.equal(h.store.task(id).status, 'open');
@@ -206,14 +207,9 @@ test('the scan’s own bookkeeping during the worker check does not reject a com
   const h = fixture(t);
   const id = h.add();
   const g = holdRead(h, h.worker(id));
-  const done = h.runtime.updateTask(caller('product'), { task: id, status: 'done', note: 'Ok' });
+  const done = h.runtime.updateTask(caller(), { task: id, status: 'done', note: 'Ok' });
   await g.entered;
-  h.store.run(
-    'UPDATE tasks SET woken=?,check_at=?,idle_wakes=1,poked=NULL WHERE id=?',
-    h.now(),
-    h.now() + MINUTE,
-    id,
-  );
+  h.store.run('UPDATE tasks SET check_at=?,idle_wakes=1,poked=0 WHERE id=?', h.now() + MINUTE, id);
   g.release();
   assert.equal((await done).status, 'done');
 });
@@ -227,7 +223,7 @@ test('stopping a cancelled task’s workers is retried until they stop, then nev
     if (method === 'sessions.abort') throw Error('abort offline');
     return next();
   };
-  await h.runtime.updateTask(caller('product'), { task: id, status: 'cancelled', note: 'Stop' });
+  await h.runtime.updateTask(caller(), { task: id, status: 'cancelled', note: 'Stop' });
   assert.equal(count(h, 'sessions.abort'), 1);
   await h.runtime.tick();
   assert.equal(count(h, 'sessions.abort'), 1);
@@ -254,7 +250,7 @@ test('a cancelled task’s worker whose session is gone counts as stopped', asyn
   const id = h.add();
   const w = h.worker(id);
   h.native.sessions = h.native.sessions.filter((row) => row.key !== w);
-  await h.runtime.updateTask(caller('product'), { task: id, status: 'cancelled', note: 'Stop' });
+  await h.runtime.updateTask(caller(), { task: id, status: 'cancelled', note: 'Stop' });
   assert.equal(count(h, 'sessions.abort'), 0);
   assert.equal(h.store.task(id).check_at, null);
 });
@@ -272,7 +268,7 @@ test('an unreadable worker state is retried, a few tasks per scan', async (t) =>
     return next();
   };
   for (const id of ids)
-    await h.runtime.updateTask(caller('product'), { task: id, status: 'cancelled', note: 'Stop' });
+    await h.runtime.updateTask(caller(), { task: id, status: 'cancelled', note: 'Stop' });
   h.advance(5 * MINUTE);
   const reads = count(h, 'sessions.list');
   await h.runtime.tick();
@@ -290,8 +286,8 @@ test('an unreadable worker state is retried, a few tasks per scan', async (t) =>
 test('a worker recorded after its task was cancelled is stopped by the next scan', async (t) => {
   const h = fixture(t);
   const id = h.add();
-  const key = taskSessionKey('engineering', h.store.task(id));
-  await h.runtime.updateTask(caller('product'), { task: id, status: 'cancelled', note: 'Stop' });
+  const key = taskSessionKey(h.store.task(id));
+  await h.runtime.updateTask(caller(), { task: id, status: 'cancelled', note: 'Stop' });
   const w = 'agent:worker:late';
   h.session(w, { hasActiveRun: true });
   h.runtime.recordWorker(key, w);
@@ -307,12 +303,12 @@ test('reopening a task while its workers are being stopped prevents the stop', a
   const h = fixture(t);
   const id = h.add();
   const w = h.worker(id);
-  h.store.run("UPDATE tasks SET status='cancelled',holder=NULL,check_at=? WHERE id=?", h.now(), id);
+  h.store.run("UPDATE tasks SET status='cancelled',check_at=? WHERE id=?", h.now(), id);
   h.session(w, { hasActiveRun: true });
   const g = holdRead(h, w);
   const scan = h.runtime.tick();
   await g.entered;
-  await h.runtime.updateTask(caller('product'), { task: id, status: 'open', note: 'Resume' });
+  await h.runtime.updateTask(caller(), { task: id, status: 'open', note: 'Resume' });
   g.release();
   await scan;
   assert.equal(count(h, 'sessions.abort'), 0);
@@ -323,12 +319,7 @@ for (const poked of [false, true]) {
   test(`failed ${poked ? 'poked' : 'scheduled'} wakes retry at five-minute cadence and count toward a stall`, async (t) => {
     const h = fixture(t);
     const id = h.add();
-    h.store.run(
-      'UPDATE tasks SET poked=?,check_at=? WHERE id=?',
-      poked ? h.now() : null,
-      h.now(),
-      id,
-    );
+    h.store.run('UPDATE tasks SET poked=?,check_at=? WHERE id=?', poked ? 1 : 0, h.now(), id);
     h.native.hook = (method, params, next) => {
       if (method === 'agent') throw Error('dispatch offline');
       return next();
@@ -337,7 +328,7 @@ for (const poked of [false, true]) {
       await h.runtime.tick();
       assert.match(h.runtime.health.lastError, /dispatch offline/);
       assert.equal(h.store.task(id).idle_wakes, i);
-      assert.equal(h.store.task(id).poked, poked ? 1_000_000_000 : null);
+      assert.equal(h.store.task(id).poked, 0);
       const tries = h.native.calls.filter(([m]) => m === 'agent').length;
       h.advance(MINUTE);
       await h.runtime.tick();
@@ -379,7 +370,7 @@ test('changed tasks during native wake preparation are neither dispatched nor st
   };
   const scan = h.runtime.tick();
   await g.entered;
-  await h.runtime.updateTask(caller('product'), { task: id, note: 'Fresh information' });
+  await h.runtime.updateTask(caller(), { task: id, note: 'Fresh information' });
   const latest = h.store.task(id);
   g.release();
   await scan;
@@ -389,10 +380,10 @@ test('changed tasks during native wake preparation are neither dispatched nor st
 });
 
 for (const outcome of ['accepted', 'lost acknowledgement'])
-  test(`the holder acting during a wake dispatch keeps its own check-in (${outcome})`, async (t) => {
+  test(`the task session acting during a wake dispatch keeps its own check-in (${outcome})`, async (t) => {
     const h = fixture(t);
     const id = h.add();
-    h.store.run('UPDATE tasks SET poked=?,check_at=? WHERE id=?', h.now(), h.now(), id);
+    h.store.run('UPDATE tasks SET poked=1,check_at=? WHERE id=?', h.now(), id);
     const g = gate();
     h.native.hook = async (method, params, next) => {
       if (method !== 'agent') return next();
@@ -404,18 +395,18 @@ for (const outcome of ['accepted', 'lost acknowledgement'])
     };
     const scan = h.runtime.tick();
     await g.entered;
-    await h.runtime.updateTask(caller('engineering'), {
-      task: id,
+    const task = h.store.task(id);
+    await h.runtime.updateTask(caller(taskSessionKey(task), task), {
       note: 'On it',
       check_in_minutes: 17,
     });
     g.release();
     assert.deepEqual((await scan).woken, [id]);
     const row = h.store.task(id);
-    assert.deepEqual([row.check_at, row.poked, row.idle_wakes], [h.now() + 17 * MINUTE, null, 0]);
+    assert.deepEqual([row.check_at, row.poked, row.idle_wakes], [h.now() + 17 * MINUTE, 0, 0]);
   });
 
-test('another manager’s note during a wake dispatch wakes the holder again after the turn', async (t) => {
+test('a note from another session during a wake dispatch wakes the task again after the turn', async (t) => {
   const h = fixture(t);
   const id = h.add();
   h.store.run('UPDATE tasks SET check_at=? WHERE id=?', h.now(), id);
@@ -429,18 +420,18 @@ test('another manager’s note during a wake dispatch wakes the holder again aft
   };
   const scan = h.runtime.tick();
   await g.entered;
-  await h.runtime.updateTask(caller('product'), { task: id, note: 'Also check X' });
+  await h.runtime.updateTask(caller(), { task: id, note: 'Also check X' });
   g.release();
   await scan;
-  assert.notEqual(h.store.task(id).poked, null);
-  h.session(taskSessionKey('engineering', h.store.task(id)), { hasActiveRun: false });
+  assert.equal(h.store.task(id).poked, 1);
+  h.session(taskSessionKey(h.store.task(id)), { hasActiveRun: false });
   h.runtime.wakes.clear();
   assert.deepEqual((await h.runtime.tick()).woken, [id]);
   assert.match(h.native.calls.filter(([m]) => m === 'agent').at(-1)[1].message, /Also check X/);
 });
 
 const attachment = (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'jg-file-'));
+  const dir = mkdtempSync(join(tmpdir(), 'crew-file-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const path = join(dir, 'plan.png');
   writeFileSync(path, 'png');
@@ -510,7 +501,7 @@ test('two deliveries of one message at once send it once', async (t) => {
 });
 
 test('foreign schema-zero databases are refused read-only and rejected handles close', (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'jg-admission-'));
+  const dir = mkdtempSync(join(tmpdir(), 'crew-admission-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   for (const version of [0, 99]) {
     const path = join(dir, `foreign-${version}.sqlite`);
@@ -551,7 +542,7 @@ test('foreign schema-zero databases are refused read-only and rejected handles c
     const path = join(dir, `empty-${existing}.sqlite`);
     if (existing) new DatabaseSync(path).close();
     const store = new Store(path);
-    assert.equal(store.get('PRAGMA user_version').user_version, 19);
+    assert.equal(store.get('PRAGMA user_version').user_version, 20);
     assert.equal(statSync(path).mode & 0o777, 0o600);
     store.close();
   }

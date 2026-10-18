@@ -23,16 +23,14 @@ import { createCopy, verifyBoard } from '../scripts/board-backup.mjs';
 import { Store } from '../src/store.ts';
 
 function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'jg-recovery-'));
+  const root = mkdtempSync(join(tmpdir(), 'crew-recovery-'));
   chmodSync(root, 0o700);
   const source = join(root, 'source.sqlite');
   const store = new Store(source);
   store.db.exec('PRAGMA wal_autocheckpoint=0');
   store.run("INSERT INTO projects(id,name,created,updated) VALUES('p','Private fixture',1,1)");
-  store.run(
-    "INSERT INTO tasks(project,title,created_by,created,updated) VALUES('p','Fixture','product',1,1)",
-  );
-  store.note(1, 'product', 'Private fixture note');
+  store.run("INSERT INTO tasks(project,title,created,updated) VALUES('p','Fixture',1,1)");
+  store.note(1, 'Private fixture note');
   store.enqueue('p', 1, 'Private fixture notification');
   t.after(() => {
     store.close();
@@ -47,7 +45,7 @@ test('backup includes committed WAL, excludes an uncommitted write, and verifies
   const mainBefore = readFileSync(source);
   const walBefore = readFileSync(source + '-wal');
   store.db.exec('BEGIN IMMEDIATE');
-  store.note(1, 'engineering', 'Uncommitted note');
+  store.note(1, 'Uncommitted note');
   const snapshotDir = join(root, 'snapshot');
   const report = await createCopy('backup', source, snapshotDir);
   store.db.exec('ROLLBACK');
@@ -243,5 +241,5 @@ test('CLI validates arguments and verifies without gateway or runtime imports', 
     { encoding: 'utf8', cwd: root },
   );
   assert.equal(verify.status, 0, verify.stderr);
-  assert.equal(JSON.parse(verify.stdout).schema, 19);
+  assert.equal(JSON.parse(verify.stdout).schema, 20);
 });

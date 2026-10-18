@@ -3,8 +3,9 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-// The board: projects, tasks (whose turn it is), their notes, and the notification outbox.
-export const SCHEMA_VERSION = 19;
+// The board: projects, tasks, their notes, and the notification outbox. An open task is the
+// lead's turn; a waiting one waits on the user.
+export const SCHEMA_VERSION = 20;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS projects(
@@ -21,12 +22,9 @@ CREATE TABLE IF NOT EXISTS tasks(
   title TEXT NOT NULL,
   body TEXT NOT NULL DEFAULT '',
   plan TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','done','cancelled')),
-  holder TEXT CHECK(holder IN ('product','engineering','user')),
-  created_by TEXT NOT NULL CHECK(created_by IN ('product','engineering')),
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','waiting','done','cancelled')),
   workers TEXT NOT NULL DEFAULT '[]',
-  poked INTEGER,
-  woken INTEGER,
+  poked INTEGER NOT NULL DEFAULT 0,
   check_at INTEGER,
   idle_wakes INTEGER NOT NULL DEFAULT 0,
   stalled INTEGER,
@@ -37,7 +35,6 @@ CREATE INDEX IF NOT EXISTS tasks_open ON tasks(status, project);
 CREATE TABLE IF NOT EXISTS notes(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   task INTEGER NOT NULL REFERENCES tasks(id),
-  author TEXT NOT NULL,
   text TEXT NOT NULL,
   created INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS notes_task ON notes(task, id);
@@ -127,19 +124,13 @@ export class Store {
   }
   notes(task, limit = 50) {
     return this.all(
-      'SELECT author,text,created FROM (SELECT * FROM notes WHERE task=? ORDER BY id DESC LIMIT ?) ORDER BY id',
+      'SELECT id,text,created FROM (SELECT * FROM notes WHERE task=? ORDER BY id DESC LIMIT ?) ORDER BY id',
       task,
       limit,
     );
   }
-  note(task, author, text) {
-    this.run(
-      'INSERT INTO notes(task,author,text,created) VALUES(?,?,?,?)',
-      task,
-      author,
-      text,
-      this.now(),
-    );
+  note(task, text) {
+    this.run('INSERT INTO notes(task,text,created) VALUES(?,?,?)', task, text, this.now());
   }
   enqueue(project, task, text, files = []) {
     const now = this.now();

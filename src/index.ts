@@ -3,23 +3,10 @@ import { AsyncResource } from 'node:async_hooks';
 import { Store } from './store.js';
 import { BoardRuntime } from './runtime.js';
 import { Bridge } from './bridge.js';
-import {
-  agentLabel,
-  currentConfig,
-  persona,
-  PRIVATE_GUIDANCE,
-  projectRoleContext,
-} from './role-context.js';
-import {
-  agentForRole,
-  configureTopology,
-  isManagerAgent,
-  isPrivateSession,
-  roleForAgent,
-  topology,
-} from './topology.js';
+import { currentConfig, LEAD_CONTEXT, persona, PRIVATE_GUIDANCE } from './role-context.js';
+import { configureTopology, isLead, isPrivateSession, topology } from './topology.js';
 
-export const OPERATIONS = [
+const OPERATIONS = [
   'list',
   'show',
   'create_project',
@@ -38,7 +25,7 @@ const parameters = {
       type: 'string',
       enum: OPERATIONS,
       description:
-        'list: projects and open tasks. show: one task with its notes (or one project with its context). create_project / update_project (product; engineering may update context). add_task. update_task: note, handover (holder), close (status), check_in_minutes, plan. notify: message the user (product).',
+        'list: projects and open tasks. show: one task with its notes (or one project with its context). create_project / update_project. add_task. update_task: note, status, message, check_in_minutes, plan. notify: message the user.',
     },
     project: {
       type: 'string',
@@ -63,26 +50,21 @@ const parameters = {
     },
     title: { type: 'string', description: 'add_task: short title.' },
     body: { type: 'string', description: 'add_task: what is wanted, in plain words.' },
-    holder: {
-      type: 'string',
-      enum: ['product', 'engineering', 'user'],
-      description:
-        'Whose turn it is. add_task (default engineering) or update_task (handover; needs a note).',
-    },
     note: {
       type: 'string',
       description:
-        'update_task: progress, result, question or answer. Required when handing over or closing.',
+        'update_task: progress, result, question or the user’s answer. Required when the status changes.',
     },
     status: {
       type: 'string',
-      enum: ['open', 'done', 'cancelled'],
-      description: 'update_task: close (done/cancelled) or reopen (open, product).',
+      enum: ['open', 'waiting', 'done', 'cancelled'],
+      description:
+        'update_task: open (your turn: after the user’s answer, or to reopen), waiting (on the user, after asking them), done or cancelled.',
     },
     message: {
       type: 'string',
       description:
-        'update_task/notify: text for the user, sent to the project chat. Required outside that chat when handing to the user or closing a product task.',
+        'update_task/notify: text for the user, sent to the project chat. Required outside that chat when asking the user (waiting) or closing a task.',
     },
     attachments: {
       type: 'array',
@@ -104,7 +86,7 @@ const parameters = {
   },
 };
 
-export const OUTPUT_LIMIT = 16 * 1024;
+const OUTPUT_LIMIT = 16 * 1024;
 const bound = (value) => {
   const encoded = JSON.stringify(value ?? null);
   return Buffer.byteLength(encoded) <= OUTPUT_LIMIT
@@ -138,7 +120,7 @@ const COMPANION_RESET_MS = 5 * 60 * 1000;
 // A worker launch whose after_tool_call never comes stops counting after this long; the
 // longest native spawn request wait (cloud sessions, 15 minutes) plus a minute.
 const LAUNCH_MS = 16 * 60 * 1000;
-const boards = (globalThis[Symbol.for('jarvis-gilfoyle.boards')] ??= new Map());
+const boards = (globalThis[Symbol.for('crew.boards')] ??= new Map());
 const sharedBoard = (cfg, create) => {
   if (cfg.statePath === ':memory:') return create();
   const key = JSON.stringify(cfg);
@@ -152,13 +134,12 @@ const launchId = (event, ctx) => {
 };
 
 export default {
-  id: 'jarvis-gilfoyle',
-  name: 'Jarvis-Gilfoyle project board',
+  id: 'crew',
+  name: 'Crew project board',
   register(api) {
     const cfg = api.pluginConfig ?? {};
     configureTopology({
-      productAgentId: cfg.productAgentId,
-      engineeringAgentId: cfg.engineeringAgentId,
+      leadAgentId: cfg.leadAgentId,
       workerAgentId: cfg.worker?.agentId,
       workerRuntime: cfg.worker?.runtime,
       workerLimit: cfg.worker?.limit,
@@ -174,8 +155,8 @@ export default {
     // Launches in progress outlive a runtime replacement; monotonic time ignores clock changes.
     board.launches ??= new Map();
     const launchNow = testHooks.launchNow ?? (() => performance.now());
-    // Writes to a chat's session run in the board service's own async context. Called from a
-    // manager's tool call, OpenClaw's write context for that turn refuses a write to another
+    // Writes to a chat's session run in the board service's own async context. Called from
+    // the lead's tool call, OpenClaw's write context for that turn refuses a write to another
     // session ("session writer claim changed before transcript persistence").
     const outsideTurns = (write) => (params) =>
       (board.serviceScope ?? ((run) => run()))(() => write(params));
@@ -201,8 +182,7 @@ export default {
             ownerChat: cfg.ownerChat ?? null,
             log: (message) => api.logger?.warn?.(message),
             turnTimeoutSeconds: cfg.turnTimeoutSeconds ?? 1800,
-            maxWakesPerRole: cfg.maxWakesPerRole ?? 2,
-            agentName: (role) => agentLabel(currentConfig(api), agentForRole(role)),
+            maxTaskSessions: cfg.maxTaskSessions ?? 2,
             appendTranscript:
               testHooks.appendTranscript ??
               outsideTurns(async (params) =>
@@ -213,11 +193,11 @@ export default {
               outsideTurns(async (params) =>
                 (await transcripts()).publishSessionTranscriptUpdateByIdentity(params),
               ),
-            // One tool-free model call as the product manager, with no session, in the
-            // caller's context (not outsideTurns): OpenClaw admits it only from running work.
+            // One tool-free model call as the lead, with no session, in the caller's
+            // context (not outsideTurns): OpenClaw admits it only from running work.
             adapt: api.runtime?.subagent?.complete
               ? async ({ system, message }) => {
-                  const agentId = topology().productAgentId;
+                  const agentId = topology().leadAgentId;
                   const own = persona(currentConfig(api), agentId);
                   const result = await api.runtime.subagent.complete({
                     agentId,
@@ -242,7 +222,7 @@ export default {
           at: Date.now(),
           message: `Project board unavailable (${String(error?.message ?? error)
             .split('\n')[0]
-            .slice(0, 300)}); the operator must fix the jarvis-gilfoyle statePath.`,
+            .slice(0, 300)}); the operator must fix the crew statePath.`,
         };
         api.logger?.warn?.(board.openError.message);
         throw new Error(board.openError.message);
@@ -255,13 +235,13 @@ export default {
       return runtime;
     };
     const agentOf = (ctx) => ctx?.agentId ?? /^agent:([^:]+):/.exec(ctx?.sessionKey ?? '')?.[1];
-    // Hooks run for every agent: they return at once unless a manager is involved, and a
+    // Hooks run for every agent: they return at once unless the lead is involved, and a
     // failure is logged and ignored so no hook can block unrelated work.
     const on = (name, fn) =>
       api.on(name, (event, ctx) => {
         const failed = (error) => {
           api.logger?.warn?.(
-            `jarvis-gilfoyle ${name} hook skipped: ${String(error?.message ?? error).slice(0, 300)}`,
+            `crew ${name} hook skipped: ${String(error?.message ?? error).slice(0, 300)}`,
           );
           return undefined;
         };
@@ -275,12 +255,12 @@ export default {
 
     api.registerTool(
       (ctx) => {
-        if (!isManagerAgent(ctx.agentId)) return null;
+        if (!isLead(ctx.agentId)) return null;
         return {
           name: 'project_board',
           label: 'Project board',
           description:
-            'The shared project board: projects, tasks with whose turn it is (holder), notes, and guaranteed messages to the project chat. Load the project-coordination skill for how to use it.',
+            'The project board: projects, tasks with their status and notes, and guaranteed messages to the project chat. Load the crew-lead skill for how to use it.',
           parameters,
           async execute(_id, args = {}) {
             const { operation, ...input } = args;
@@ -309,10 +289,10 @@ export default {
     );
 
     api.registerGatewayMethod(
-      'jarvis-gilfoyle.board.call',
+      'crew.board.call',
       async ({ params, respond }) => {
         try {
-          const agentId = params.agentId ?? topology().productAgentId;
+          const agentId = topology().leadAgentId;
           respond(
             true,
             await get().operation(params.operation, params.input ?? {}, {
@@ -327,7 +307,7 @@ export default {
       { scope: 'operator.admin' },
     );
     api.registerGatewayMethod(
-      'jarvis-gilfoyle.board.tick',
+      'crew.board.tick',
       async ({ respond }) => {
         try {
           respond(true, await get().tick());
@@ -341,7 +321,7 @@ export default {
       { scope: 'operator.admin' },
     );
     api.registerGatewayMethod(
-      'jarvis-gilfoyle.board.health',
+      'crew.board.health',
       async ({ respond }) => {
         try {
           const r = get();
@@ -364,7 +344,7 @@ export default {
     on('message_received', (event, ctx) => {
       const sessionKey = ctx?.sessionKey ?? event?.sessionKey;
       const agentId = agentOf({ agentId: ctx?.agentId, sessionKey });
-      if (!isManagerAgent(agentId) || isPrivateSession(sessionKey)) return;
+      if (!isLead(agentId) || isPrivateSession(sessionKey)) return;
       return get().captureInbound(sessionKey, agentId, {
         channel: ctx.channelId,
         accountId: ctx.accountId ?? 'default',
@@ -373,30 +353,26 @@ export default {
       });
     });
     on('before_prompt_build', async (_event, ctx) => {
-      const agentId = agentOf(ctx);
-      if (!isManagerAgent(agentId)) return;
+      if (!isLead(agentOf(ctx))) return;
       // A per-session first line gives each session its own prompt-cache routing on
       // providers that route by the start of the prompt (OpenAI through OpenRouter).
-      const role = [
-        ctx.sessionKey ? `Session ${ctx.sessionKey}.` : '',
-        projectRoleContext(currentConfig(api), agentId),
-      ]
+      const system = [ctx.sessionKey ? `Session ${ctx.sessionKey}.` : '', LEAD_CONTEXT]
         .filter(Boolean)
         .join('\n');
       let r;
       try {
         r = get();
       } catch {
-        return { prependSystemContext: role };
+        return { prependSystemContext: system };
       }
       if (isPrivateSession(ctx.sessionKey))
         return {
-          prependSystemContext: `${role}\n${PRIVATE_GUIDANCE}`,
+          prependSystemContext: `${system}\n${PRIVATE_GUIDANCE}`,
           prependContext: r.taskCard(ctx.sessionKey),
         };
       await r.beginTurn(ctx.sessionKey);
-      const chat = roleForAgent(agentId) === 'product' ? r.chatContext(ctx.sessionKey) : null;
-      return { prependSystemContext: role, ...(chat ? { prependContext: chat } : {}) };
+      const chat = r.chatContext(ctx.sessionKey);
+      return { prependSystemContext: system, ...(chat ? { prependContext: chat } : {}) };
     });
     on('before_agent_run', (_event, ctx) => {
       if (!isPrivateSession(ctx?.sessionKey) || get().allowRun(ctx.sessionKey)) return;
@@ -416,7 +392,7 @@ export default {
         return { cancel: true, cancelReason: 'Private project session.' };
     });
     on('before_tool_call', (event, ctx) => {
-      if (!isManagerAgent(agentOf(ctx)) || !isPrivateSession(ctx?.sessionKey)) return;
+      if (!isLead(agentOf(ctx)) || !isPrivateSession(ctx?.sessionKey)) return;
       if (event?.toolName !== 'sessions_spawn') return get().beforeToolCall(event, ctx);
       // Earlier launches still in progress count towards the limit. This one is added
       // before the count can await, so parallel launches see each other.
@@ -458,7 +434,7 @@ export default {
       }
     });
     on('agent_end', (_event, ctx) => {
-      if (!isManagerAgent(agentOf(ctx))) return;
+      if (!isLead(agentOf(ctx))) return;
       const r = get();
       r.endTurn(ctx.sessionKey);
       if (isPrivateSession(ctx.sessionKey)) r.requestTick();
@@ -476,7 +452,7 @@ export default {
       board.serviceScope = null;
     };
     api.registerService({
-      id: 'jarvis-gilfoyle-board',
+      id: 'crew-board',
       start: async () => {
         // A reload starts a new registration's service while an earlier one owns the board.
         // Objects the earlier code created (its companion process, its runtime) do not work

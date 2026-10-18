@@ -29,7 +29,7 @@
     "test": "npm run test:behavior",
     "test:behavior": "node --import tsx --test test/*.test.ts",
     "test:recovery": "node --import tsx --test test/recovery.test.ts",
-    "test:native": "JG_NATIVE_TEST=1 node --import tsx --test test/*.test.ts",
+    "test:native": "CREW_NATIVE_TEST=1 node --import tsx --test test/*.test.ts",
     "pack:check": "npm pack --dry-run --ignore-scripts",
     "prepack": "npm run check && npm test"
   },

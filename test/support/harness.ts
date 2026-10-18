@@ -7,14 +7,14 @@ export const EPOCH = Date.parse('2026-09-28T09:00:00Z');
 export const MINUTE = 60 * 1000;
 export const ref = (c) => `conv_${c.repeat(32)}`;
 
-// `complete` stands in for api.runtime.subagent.complete; `workspace` is the product
-// manager's workspace folder.
+// `complete` stands in for api.runtime.subagent.complete; `workspace` is the lead's
+// workspace folder.
 export async function harness({ config = {}, complete = null, workspace = null } = {}) {
   let clock = EPOCH;
   let admissionClock = 0;
   const native = {
     conversations: [
-      // The owner's DM with the product manager, and a project group.
+      // The owner's DM with the lead, and a project group.
       {
         conversationRef: ref('a'),
         channel: 'telegram',
@@ -114,7 +114,7 @@ export async function harness({ config = {}, complete = null, workspace = null }
           native.aborted.push(params.key);
           native.session(params.key).hasActiveRun = false;
           return { ok: true };
-        case 'jarvis-gilfoyle.session.cleanup':
+        case 'crew.session.cleanup':
           native.cleaned.push(params.sessionKey);
           native.sessions = native.sessions.filter((s) => s.key !== params.sessionKey);
           return { removedEntries: 1, archivedTranscriptArtifacts: 0 };
@@ -139,8 +139,7 @@ export async function harness({ config = {}, complete = null, workspace = null }
   let factory;
   const pluginConfig = {
     statePath: ':memory:',
-    productAgentId: 'main',
-    engineeringAgentId: 'gilfoyle',
+    leadAgentId: 'lead',
     ownerChat: { channel: 'telegram', accountId: 'default', to: 'telegram:100' },
     worker: {
       agentId: 'opencode',
@@ -167,14 +166,7 @@ export async function harness({ config = {}, complete = null, workspace = null }
     let made;
     plugin.register({
       pluginConfig: cfg,
-      config: {
-        agents: {
-          entries: {
-            main: { identity: { name: 'Jarvis' }, ...(workspace ? { workspace } : {}) },
-            gilfoyle: { name: 'Gilfoyle' },
-          },
-        },
-      },
+      config: { agents: { entries: { lead: workspace ? { workspace } : {} } } },
       ...(complete ? { runtime: { subagent: { complete } } } : {}),
       logger: { warn: (message) => warnings.push(message) },
       registerTool(make) {
@@ -215,22 +207,23 @@ export async function harness({ config = {}, complete = null, workspace = null }
     tool(agentId, sessionKey) {
       return factory({ agentId, sessionKey });
     },
-    // Calls project_board and returns the parsed result; errors come back as {error}.
-    async call(agentId, sessionKey, args) {
-      const result = await factory({ agentId, sessionKey }).execute('call', args);
+    // The lead calls project_board and gets the parsed result; errors come back as {error}.
+    async call(sessionKey, args) {
+      const result = await factory({ agentId: 'lead', sessionKey }).execute('call', args);
       return JSON.parse(result.content[0].text);
     },
-    // A user message in a chat followed by the start of the manager's turn.
-    async userMessage(agentId, sessionKey, target, channel = 'telegram') {
+    // A user message in a chat followed by the start of the lead's turn.
+    async userMessage(sessionKey, target, channel = 'telegram') {
+      const agentId = 'lead';
       await hooks.message_received(
         { from: target, content: 'hi' },
         { agentId, sessionKey, channelId: channel, accountId: 'default', conversationId: target },
       );
       return hooks.before_prompt_build({}, { agentId, sessionKey });
     },
-    endTurn(agentId, sessionKey) {
+    endTurn(sessionKey) {
       native.session(sessionKey).hasActiveRun = false;
-      return hooks.agent_end({ success: true }, { agentId, sessionKey });
+      return hooks.agent_end({ success: true }, { agentId: 'lead', sessionKey });
     },
     endAllRuns() {
       for (const row of native.sessions)
@@ -264,9 +257,9 @@ export async function harness({ config = {}, complete = null, workspace = null }
       return { childSessionKey, params: before?.params ?? params };
     },
   };
-  await h.call('main', 'agent:main:operator', { operation: 'list' });
+  await h.call('agent:lead:operator', { operation: 'list' });
   return h;
 }
 
-export const JARVIS_DM = 'agent:main:telegram:direct:100';
-export const JARVIS_GROUP = 'agent:main:telegram:group:-200';
+export const LEAD_DM = 'agent:lead:telegram:direct:100';
+export const LEAD_GROUP = 'agent:lead:telegram:group:-200';

@@ -5,19 +5,17 @@ import { basename, isAbsolute } from 'node:path';
 import { readStringParam } from 'openclaw/plugin-sdk/param-readers';
 import { normalizeAgentIdStrict } from 'openclaw/plugin-sdk/routing';
 import {
-  agentForRole,
-  isManagerAgent,
+  isLead,
   isPrivateSession,
   parseTaskSession,
-  roleForAgent,
   taskScope,
   taskSessionKey,
   topology,
 } from './topology.js';
 
 const MINUTE = 60 * 1000;
-export const CHECK_IN_MINUTES = 60;
-export const STALL_WAKES = 3;
+const CHECK_IN_MINUTES = 60;
+const STALL_WAKES = 3;
 const WAKE_RETRY_MINUTES = 5;
 const WAKE_GRACE_MS = MINUTE;
 const WORKER_GRACE_MS = 2 * MINUTE;
@@ -37,7 +35,6 @@ const ADAPT_INSTRUCTIONS = `You are about to send a message in a project chat. I
 Reply with the message text only.`;
 const PREFERRED_ATTEMPTS = 3;
 const FALLBACK_ATTEMPTS = 10;
-const ROLES = ['product', 'engineering'];
 const ZERO_USAGE = {
   input: 0,
   output: 0,
@@ -46,10 +43,18 @@ const ZERO_USAGE = {
   totalTokens: 0,
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
-const HOLDERS = ['product', 'engineering', 'user'];
+// An open task is the lead's turn; a waiting task waits on the user.
+const STATUSES = ['open', 'waiting', 'done', 'cancelled'];
+const isClosed = (status) => status === 'done' || status === 'cancelled';
+const STATUS_LINE = {
+  open: 'open, your turn',
+  waiting: 'waiting on the user',
+  done: 'done',
+  cancelled: 'cancelled',
+};
 
 // Reuse the native reader's alias precedence and target canonicalization.
-export const spawnAgentId = (params) => {
+const spawnAgentId = (params) => {
   const target = readStringParam(params ?? {}, 'agentId');
   if (!target) return undefined;
   const normalized = normalizeAgentIdStrict(target);
@@ -57,7 +62,7 @@ export const spawnAgentId = (params) => {
 };
 
 const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/;
-export function text(value, max, name) {
+function text(value, max, name) {
   assert(typeof value === 'string', `${name} must be text`);
   const normalized = value.replace(/\r\n?/g, '\n').trim();
   assert(normalized, `${name} must not be empty`);
@@ -101,7 +106,7 @@ const slug = (name) =>
     .slice(0, 40)
     .replace(/-+$/, '') || 'project';
 
-export const conversation = (value) => {
+const conversation = (value) => {
   assert(
     value && /^conv_[a-f0-9]{30,64}$/.test(value.conversationRef ?? ''),
     'Native conversation reference required',
@@ -124,7 +129,7 @@ const chatLabel = (route) =>
 
 // A native session row is working when its own turn is live (not a stale leftover) or,
 // for workers, when descendants still run.
-export const rowLive = (row, now) =>
+const rowLive = (row, now) =>
   row?.hasActiveRun === true && !(now - Number(row.updatedAt) > STALE_RUN_MS);
 const rowBusy = (row, now) => rowLive(row, now) || row?.hasActiveSubagentRun === true;
 
@@ -137,8 +142,7 @@ export class BoardRuntime {
       now = () => Date.now(),
       log = () => {},
       turnTimeoutSeconds = 1800,
-      maxWakesPerRole = 2,
-      agentName = (role) => role,
+      maxTaskSessions = 2,
       appendTranscript = async () => {
         throw new Error('Transcript append unavailable');
       },
@@ -153,11 +157,10 @@ export class BoardRuntime {
     this.now = now;
     this.log = log;
     this.turnTimeoutSeconds = turnTimeoutSeconds;
-    this.maxWakesPerRole = maxWakesPerRole;
-    this.agentName = agentName;
+    this.maxTaskSessions = maxTaskSessions;
     this.appendTranscript = appendTranscript;
     this.publishTranscript = publishTranscript;
-    this.adapt = adapt; // ({system, message}) -> text, as the product manager; null when unavailable
+    this.adapt = adapt; // ({system, message}) -> text, as the lead; null when unavailable
     this.sleep = sleep;
     this.sending = Promise.resolve(); // deliveries run one at a time
     this.sources = new Map(); // session -> newest inbound chat {route, at, used}
@@ -176,17 +179,14 @@ export class BoardRuntime {
 
   caller(ctx = {}) {
     const agentId = ctx.agentId ?? /^agent:([^:]+):/.exec(ctx.sessionKey ?? '')?.[1];
-    const role = roleForAgent(agentId);
-    assert(role, 'Only the product and engineering managers use the project board');
+    assert(isLead(agentId), 'Only the lead uses the project board');
     const scope = parseTaskSession(ctx.sessionKey);
     let task = null;
     if (scope) {
-      assert(scope.role === role, 'This private session belongs to the other manager');
       task = this.store.task(scope.taskId);
       assert(task.created === scope.created, 'This private session belongs to a removed task');
     } else assert(!isPrivateSession(ctx.sessionKey), 'This private session has no task');
     return {
-      role,
       task,
       session: ctx.sessionKey ?? '',
       source: task ? null : (this.turns.get(ctx.sessionKey) ?? null),
@@ -254,7 +254,6 @@ export class BoardRuntime {
       id: task.id,
       title: task.title,
       status: task.status,
-      ...(task.status === 'open' ? { waitingOn: task.holder } : {}),
       ...(task.stalled ? { stalled: when(task.stalled) } : {}),
       updated: when(task.updated),
       ...(detail
@@ -262,7 +261,6 @@ export class BoardRuntime {
             project: task.project,
             body: task.body,
             ...(task.plan ? { plan: task.plan } : {}),
-            createdBy: task.created_by,
             workers: task.workers.map((worker) => worker.key),
             ...(task.check_at && task.status === 'open'
               ? { nextCheckIn: when(task.check_at) }
@@ -273,11 +271,11 @@ export class BoardRuntime {
   }
   projectView(project) {
     const open = this.store.all(
-      "SELECT * FROM tasks WHERE project=? AND status='open' ORDER BY id",
+      "SELECT * FROM tasks WHERE project=? AND status IN ('open','waiting') ORDER BY id",
       project.id,
     );
     const closed = this.store.all(
-      "SELECT * FROM tasks WHERE project=? AND status<>'open' ORDER BY updated DESC LIMIT 3",
+      "SELECT * FROM tasks WHERE project=? AND status IN ('done','cancelled') ORDER BY updated DESC LIMIT 3",
       project.id,
     );
     const failed = this.store.all(
@@ -317,7 +315,6 @@ export class BoardRuntime {
       return {
         task: this.taskView(task, true),
         notes: this.store.notes(task.id).map((note) => ({
-          by: note.author,
           at: when(note.created),
           text: note.text,
         })),
@@ -327,7 +324,6 @@ export class BoardRuntime {
     return { project: { ...this.projectView(project), context: project.context } };
   }
   createProject(caller, input) {
-    assert(caller.role === 'product', 'Only the product manager creates projects');
     const name = line(input.name, 120, 'name');
     const context = optional(input.context, 8000, 'context') ?? '';
     const base = slug(name);
@@ -351,13 +347,9 @@ export class BoardRuntime {
   }
   updateProject(caller, input) {
     const project = this.scopeProject(caller, input.project);
-    const fields = ['name', 'context', 'state', 'use_this_chat'].filter(
-      (key) => input[key] !== undefined,
-    );
-    assert(fields.length, 'Pass name, context, state or use_this_chat');
     assert(
-      caller.role === 'product' || fields.every((key) => key === 'context'),
-      'The engineering manager may only change the project context',
+      ['name', 'context', 'state', 'use_this_chat'].some((key) => input[key] !== undefined),
+      'Pass name, context, state or use_this_chat',
     );
     const now = this.now();
     const changes = {};
@@ -378,7 +370,10 @@ export class BoardRuntime {
       );
       if (input.state === 'archived')
         assert(
-          !this.store.get("SELECT 1 FROM tasks WHERE project=? AND status='open'", project.id),
+          !this.store.get(
+            "SELECT 1 FROM tasks WHERE project=? AND status IN ('open','waiting')",
+            project.id,
+          ),
           'Close or cancel the open tasks before archiving the project',
         );
       changes.state = input.state;
@@ -386,11 +381,10 @@ export class BoardRuntime {
     this.store.tx(() => {
       for (const [key, value] of Object.entries(changes))
         this.store.run(`UPDATE projects SET ${key}=?,updated=? WHERE id=?`, value, now, project.id);
-      // Resuming a project asks whoever holds each open task to look again.
+      // Resuming a project wakes each open task to look again.
       if (changes.state === 'active' && project.state !== 'active')
         this.store.run(
-          "UPDATE tasks SET poked=?,woken=NULL,idle_wakes=0,stalled=NULL WHERE project=? AND status='open' AND holder IN ('product','engineering')",
-          now,
+          "UPDATE tasks SET poked=1,idle_wakes=0,stalled=NULL WHERE project=? AND status='open'",
           project.id,
         );
     });
@@ -403,26 +397,19 @@ export class BoardRuntime {
       chat: chatLabel(updated.route),
     };
   }
+  // A new task is the lead's turn and wakes its task session at once.
   addTask(caller, input) {
     const project = this.scopeProject(caller, input.project);
     assert(project.state !== 'archived', 'The project is archived');
-    const holder = input.holder ?? 'engineering';
-    assert(
-      ROLES.includes(holder),
-      'A new task is held by product or engineering; to ask the user first, add it for product and then hand it to the user',
-    );
     const title = line(input.title, 200, 'title');
     const body = optional(input.body, 8000, 'body') ?? '';
     const now = this.now();
     const id = Number(
       this.store.run(
-        'INSERT INTO tasks(project,title,body,holder,created_by,poked,check_at,created,updated) VALUES(?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO tasks(project,title,body,poked,check_at,created,updated) VALUES(?,?,?,1,?,?,?)',
         project.id,
         title,
         body,
-        holder,
-        caller.role,
-        now,
         now + CHECK_IN_MINUTES * MINUTE,
         now,
         now,
@@ -430,11 +417,11 @@ export class BoardRuntime {
     );
     this.markSeen(caller.session, id);
     this.requestTick();
-    return { task: id, project: project.id, waitingOn: holder };
+    return { task: id, project: project.id, status: 'open' };
   }
   async updateTask(caller, input) {
     const task = this.scopeTask(caller, input.task);
-    const lastNote = this.latestNote(task.id)?.id ?? 0;
+    const lastNote = this.latestNote(task.id);
     const project = this.store.project(task.project);
     const note = optional(input.note, 4000, 'note');
     const message = optional(input.message, 4000, 'message');
@@ -446,74 +433,35 @@ export class BoardRuntime {
         ? undefined
         : (optional(input.plan, 4000, 'plan') ?? '');
     const status = input.status;
-    const holder = input.holder;
     assert(
-      [note, message, status, holder, input.check_in_minutes, plan].some(
-        (value) => value !== undefined,
-      ),
-      'Pass note, holder, status, message, check_in_minutes or plan',
+      [note, message, status, input.check_in_minutes, plan].some((value) => value !== undefined),
+      'Pass note, status, message, check_in_minutes or plan',
     );
     assert(
-      status === undefined || ['open', 'done', 'cancelled'].includes(status),
-      'status is open, done or cancelled',
+      status === undefined || STATUSES.includes(status),
+      'status is open, waiting, done or cancelled',
     );
-    assert(
-      holder === undefined || HOLDERS.includes(holder),
-      'holder is product, engineering or user',
-    );
-    const closing = status === 'done' || status === 'cancelled';
-    const reopening = status === 'open' && task.status !== 'open';
-    assert(!(closing && holder), 'Pass either holder or a closing status, not both');
-    if (task.status !== 'open') {
-      assert(
-        reopening,
-        `Task #${task.id} is ${task.status}; the product manager can reopen it with status open`,
-      );
-      assert(caller.role === 'product', 'Only the product manager reopens tasks');
+    if (isClosed(task.status)) {
+      assert(status === 'open', `Task #${task.id} is ${task.status}; reopen it with status open`);
       assert(project.state !== 'archived', 'The project is archived');
     }
-    if (closing) {
-      assert(note, 'Closing a task needs a note with the result or the reason');
-      assert(
-        caller.role === 'product' || task.created_by === 'engineering',
-        'Only the product manager closes tasks it created; hand it to product with your result in a note',
-      );
-    }
-    const newHolder = closing ? null : (holder ?? (reopening ? 'engineering' : task.holder));
-    const handover = !closing && newHolder !== task.holder;
-    if (handover || closing || reopening) {
+    const changing = status !== undefined && status !== task.status;
+    if (changing) {
+      assert(note, 'Changing the status needs a note: the result, the question or the reason');
       // Decisions are made on the latest state: another session may have changed the
       // task since this one read it in this turn.
       const seen = this.seen.get(`${caller.session}|${task.id}`);
-      const last = this.latestNote(task.id);
       assert(
-        seen === undefined || seen >= (last?.id ?? 0),
-        `Task #${task.id} changed since you read it${last ? ` (latest from ${last.author}: ${clip(last.text, 300)})` : ''}; read it with show, then decide again`,
+        seen === undefined || seen >= (lastNote?.id ?? 0),
+        `Task #${task.id} changed since you read it${lastNote ? ` (latest note: ${clip(lastNote.text, 300)})` : ''}; read it with show, then decide again`,
       );
     }
-    if (handover) {
-      assert(note, 'Handing a task over needs a note saying what is needed');
-      assert(
-        ROLES.includes(newHolder) || caller.role === 'product',
-        'Only the product manager hands tasks to the user',
-      );
-    }
-    if (handover || closing)
-      assert(
-        caller.role === 'product' || task.holder === 'engineering',
-        `Task #${task.id} is waiting on ${task.holder}; add a note instead of handing it over`,
-      );
-    if (message !== undefined)
-      assert(caller.role === 'product', 'Only the product manager messages the user');
-    // Required notifications travel with the change that requires them.
-    const mustTell =
-      (newHolder === 'user' && task.holder !== 'user') ||
-      (closing && task.created_by === 'product');
-    // In the project chat the reply is the message; sending it too would say it twice.
+    // Required messages travel with the change that requires them. In the project chat
+    // the reply is the message; sending it too would say it twice.
     const inChat = this.inProjectChat(caller, project);
-    if (mustTell && !message && !inChat)
+    if (changing && (status === 'waiting' || isClosed(status)) && !message && !inChat)
       assert.fail(
-        `${newHolder === 'user' ? 'Handing a task to the user' : 'Closing a user request'} needs message: the text the user receives in ${chatLabel(project.route)}`,
+        `${status === 'waiting' ? 'Asking the user' : 'Closing a task'} needs message: the text the user receives in ${chatLabel(project.route)}`,
       );
     let checkIn;
     if (input.check_in_minutes !== undefined) {
@@ -523,7 +471,7 @@ export class BoardRuntime {
         'check_in_minutes is 10 to 10080',
       );
     }
-    if (status === 'done') {
+    if (changing && status === 'done') {
       const live = await this.liveWorkers(task);
       assert(
         !live.length,
@@ -531,51 +479,46 @@ export class BoardRuntime {
       );
       // The task may have changed, or gained a worker, while the workers were checked.
       assert(
-        this.taskUnchanged(task, lastNote) &&
+        this.taskUnchanged(task, lastNote?.id ?? 0) &&
           this.store.task(task.id).workers.length === task.workers.length,
         `Task #${task.id} changed while its workers were checked; read it with show, then decide again`,
       );
     }
     const now = this.now();
-    // Someone else's change asks the holder to look; the holder's own action answers
-    // an outstanding poke.
-    const poke = ROLES.includes(newHolder) && newHolder !== caller.role;
-    // Only the holder's own action, or a new holder, answers the wakes it was sent.
-    // Anyone else's change to a stalled task gets the holder one more wake before the
+    const next = status ?? task.status;
+    // A change from any other session (the project chat, another task) wakes the task's
+    // own session. Only that session acting, or a new status, answers the wakes it was
+    // sent; another session's change to a stalled task gets it one more wake before the
     // stall is reported again.
-    const acted = caller.role === task.holder || handover || closing || reopening;
+    const own = caller.task?.id === task.id;
     const outbox = this.store.tx(() => {
-      if (note) this.store.note(task.id, caller.role, note);
+      if (note) this.store.note(task.id, note);
       this.store.run(
-        `UPDATE tasks SET status=?,holder=?,plan=COALESCE(?,plan),poked=CASE WHEN ? THEN ? ELSE NULL END,woken=NULL,check_at=?,
+        `UPDATE tasks SET status=?,plan=COALESCE(?,plan),poked=?,check_at=?,
            idle_wakes=CASE WHEN ? THEN 0 WHEN stalled IS NOT NULL THEN ? ELSE idle_wakes END,stalled=NULL,cleaned=CASE WHEN ? THEN NULL ELSE cleaned END,updated=? WHERE id=?`,
-        closing ? status : 'open',
-        newHolder,
+        next,
         plan ?? null,
-        poke ? 1 : 0,
-        now,
-        closing
-          ? status === 'cancelled'
-            ? now + WAKE_RETRY_MINUTES * MINUTE
-            : null
-          : now + (checkIn ?? CHECK_IN_MINUTES) * MINUTE,
-        acted ? 1 : 0,
+        own ? 0 : 1,
+        next === 'cancelled'
+          ? now + WAKE_RETRY_MINUTES * MINUTE
+          : next === 'done'
+            ? null
+            : now + (checkIn ?? CHECK_IN_MINUTES) * MINUTE,
+        own || changing ? 1 : 0,
         STALL_WAKES - 1,
-        reopening ? 1 : 0,
+        isClosed(task.status) ? 1 : 0,
         now,
         task.id,
       );
       return message && !inChat ? this.store.enqueue(project.id, task.id, message, files) : null;
     });
     this.markSeen(caller.session, task.id);
-    if (status === 'cancelled') await this.abortWorkers(this.store.task(task.id));
+    if (changing && status === 'cancelled') await this.abortWorkers(this.store.task(task.id));
     const delivery = outbox ? await this.deliver(outbox, true) : undefined;
     this.requestTick();
-    const updated = this.store.task(task.id);
     return {
-      task: updated.id,
-      status: updated.status,
-      ...(updated.holder ? { waitingOn: updated.holder } : {}),
+      task: task.id,
+      status: next,
       ...(delivery ? { message: delivery } : {}),
       ...(message && inChat
         ? {
@@ -588,7 +531,6 @@ export class BoardRuntime {
     };
   }
   async notify(caller, input) {
-    assert(caller.role === 'product', 'Only the product manager messages the user');
     const project = this.scopeProject(caller, input.project);
     const message = text(input.message ?? input.text, 4000, 'message');
     const files = attachments(input.attachments);
@@ -614,7 +556,7 @@ export class BoardRuntime {
     const owner = this.ownerChat;
     assert(owner, 'No ownerChat is configured');
     const result = await this.rpc('conversations.list', {
-      agentId: topology().productAgentId,
+      agentId: topology().leadAgentId,
       query: owner.to,
       channel: owner.channel,
       limit: 100,
@@ -632,7 +574,7 @@ export class BoardRuntime {
     return this.ownerRouteCache.route;
   }
   // One delivery at a time, including its fallback, so a rewrite sees the messages sent
-  // before it. `rewrite` is set for messages sent from a manager's turn.
+  // before it. `rewrite` is set for messages sent from the lead's turn.
   deliver(id, rewrite = false) {
     if (this.deliveries.has(id)) return this.deliveries.get(id);
     const pending = this.sending
@@ -642,9 +584,9 @@ export class BoardRuntime {
     this.deliveries.set(id, pending);
     return pending;
   }
-  // Before its first send to the project chat, the product manager rewrites a message for
-  // the conversation it lands in, given that chat since the task's request, the task and the
-  // message as written. The model call runs within the manager's turn that sent the message,
+  // Before its first send to the project chat, the lead rewrites a message for the
+  // conversation it lands in, given that chat since the task's request, the task and the
+  // message as written. The model call runs within the lead's turn that sent the message,
   // because OpenClaw admits new work only from running work; the scan's own deliveries go
   // out as written. While the chat is mid-reply, or changed during the rewrite, it waits and
   // tries again, for at most ADAPT_WAIT_MS. Any failure sends the message as written.
@@ -660,13 +602,13 @@ export class BoardRuntime {
         }
         const history = await this.rpc('chat.history', {
           sessionKey: session.key,
-          agentId: topology().productAgentId,
+          agentId: topology().leadAgentId,
           limit: 1000,
         });
         const task = row.task ? this.store.task(row.task) : null;
         const message = [
           `The project chat, oldest first (times UTC):\n${this.chatSince(history?.messages ?? [], task?.created) || '(no messages yet)'}`,
-          ...(task ? [this.taskLines(task, project, 'product').join('\n')] : []),
+          ...(task ? [this.taskLines(task, project).join('\n')] : []),
           `The message to send:\n${row.text}`,
         ].join('\n\n');
         const adapted = text(
@@ -693,7 +635,6 @@ export class BoardRuntime {
   // The chat's user and assistant text from the user's last message before `since` (the
   // request) to now. When that is long, the request and the newest messages are kept.
   chatSince(messages, since) {
-    const name = this.agentName('product');
     const chat = messages.flatMap((m) => {
       const said = (
         typeof m.content === 'string'
@@ -708,7 +649,7 @@ export class BoardRuntime {
             {
               user: m.role === 'user',
               at: Number(m.timestamp),
-              text: `[${when(Number(m.timestamp))}] ${m.role === 'user' ? 'User' : name}: ${clip(said, 4000)}`,
+              text: `[${when(Number(m.timestamp))}] ${m.role === 'user' ? 'User' : 'You'}: ${clip(said, 4000)}`,
             },
           ]
         : [];
@@ -737,7 +678,7 @@ export class BoardRuntime {
     if (!row || row.state !== 'pending') return row ? { state: row.state } : undefined;
     const project = this.store.project(row.project);
     const toOwner = row.fallback === 1 || !project.route;
-    const operation = `jarvis-gilfoyle-${row.id}-${toOwner ? 'owner' : 'project'}`;
+    const operation = `crew-${row.id}-${toOwner ? 'owner' : 'project'}`;
     let receipt = row.receipt ? JSON.parse(row.receipt) : null;
     let status = receipt?.status;
     let error, route;
@@ -747,7 +688,7 @@ export class BoardRuntime {
         await this.adaptToChat(row, project, route);
       if (!receipt) {
         const sent = await this.rpc('conversations.send', {
-          agentId: topology().productAgentId,
+          agentId: topology().leadAgentId,
           operationId: operation,
           conversationRef: route.conversationRef,
           message: sentText(row, project, toOwner),
@@ -764,7 +705,7 @@ export class BoardRuntime {
             channel: route.channel,
             action: 'send',
             accountId: route.accountId,
-            agentId: topology().productAgentId,
+            agentId: topology().leadAgentId,
             params: {
               to: route.target,
               ...(route.threadId ? { threadId: route.threadId } : {}),
@@ -831,10 +772,10 @@ export class BoardRuntime {
     return { state: failed ? 'failed' : 'retrying', error };
   }
 
-  // The product manager's session for a chat, when exactly one matches.
+  // The lead's session for a chat, when exactly one matches.
   async chatSession(route) {
     const sessions = (
-      await this.sessionRows(topology().productAgentId, route.target.replace(/^[^:]+:/, ''))
+      await this.sessionRows(topology().leadAgentId, route.target.replace(/^[^:]+:/, ''))
     ).filter(
       ({ deliveryContext: to }) =>
         to?.channel === route.channel &&
@@ -844,7 +785,7 @@ export class BoardRuntime {
     );
     return sessions.length === 1 ? sessions[0] : null;
   }
-  // A delivered message becomes the product manager's own reply in his session for the chat
+  // A delivered message becomes the lead's own reply in its session for the chat
   // it reached (the project chat or the owner DM), as text plus a MEDIA line per file, so
   // that chat's history and what the model reads next turn match the chat. It waits while
   // that session runs a turn; the scan retries for a day. Failures never affect delivery.
@@ -855,7 +796,7 @@ export class BoardRuntime {
     const toOwner = row.fallback === 1 || !project.route;
     try {
       const route = toOwner ? await this.ownerRoute() : project.route;
-      const agentId = topology().productAgentId;
+      const agentId = topology().leadAgentId;
       const session = await this.chatSession(route);
       if (!session?.sessionId || rowLive(session, this.now())) return;
       const files = JSON.parse(row.files).map((path) => `MEDIA:${path}`);
@@ -874,13 +815,13 @@ export class BoardRuntime {
         message: {
           role: 'assistant',
           content: [{ type: 'text', text: text.join('\n') }],
-          api: 'jarvis-gilfoyle',
-          provider: 'jarvis-gilfoyle',
+          api: 'crew',
+          provider: 'crew',
           model: 'project-board',
           usage: ZERO_USAGE,
           stopReason: 'stop',
           timestamp: row.created,
-          idempotencyKey: `jarvis-gilfoyle-${row.id}-chat`,
+          idempotencyKey: `crew-${row.id}-chat`,
         },
       });
       this.store.run('UPDATE outbox SET recorded=1 WHERE id=?', row.id);
@@ -999,17 +940,16 @@ export class BoardRuntime {
 
   // ---- Hook support (private sessions and project chats only) -----------------------
 
-  // Remembers the chat of a manager's newest inbound message (resolved to a native
-  // conversation the product manager can send to).
+  // Remembers the chat of the lead's newest inbound message (resolved to a native
+  // conversation the lead can send to).
   captureInbound(sessionKey, agentId, raw) {
-    if (!sessionKey || isPrivateSession(sessionKey) || !isManagerAgent(agentId)) return;
+    if (!sessionKey || isPrivateSession(sessionKey) || !isLead(agentId)) return;
     const at = this.now();
     const pending = this.resolveRoute(agentId, raw)
       .catch(() => null)
       .then((route) => {
         this.sources.set(sessionKey, { route, at, used: false });
-        if (route && agentId === topology().productAgentId)
-          this.followChatSession(sessionKey, route);
+        if (route) this.followChatSession(sessionKey, route);
       });
     this.captures.set(sessionKey, pending);
     return pending.finally(() => {
@@ -1073,17 +1013,14 @@ export class BoardRuntime {
     } else this.turns.delete(sessionKey);
   }
   latestNote(taskId) {
-    return this.store.get(
-      'SELECT id,author,text FROM notes WHERE task=? ORDER BY id DESC LIMIT 1',
-      taskId,
-    );
+    return this.store.notes(taskId, 1)[0];
   }
   // Whether anyone acted on the task since it was read. The scan's own bookkeeping
   // (woken, check_at, idle_wakes, poked) does not count.
   taskUnchanged(task, lastNote) {
     const current = this.store.task(task.id);
     return (
-      ['status', 'holder', 'updated'].every((field) => current[field] === task[field]) &&
+      ['status', 'updated'].every((field) => current[field] === task[field]) &&
       (this.latestNote(task.id)?.id ?? 0) === lastNote
     );
   }
@@ -1095,8 +1032,8 @@ export class BoardRuntime {
     this.wakes.delete(sessionKey);
     for (const key of this.seen.keys()) if (key.startsWith(`${sessionKey}|`)) this.seen.delete(key);
   }
-  // Project context for a product-manager chat that a project uses: which project, and
-  // any task waiting on the user's answer. Nothing for other chats.
+  // Project context for a chat that a project uses: which project, its context, and any
+  // task waiting on the user. Nothing for other chats.
   chatContext(sessionKey) {
     const route = this.turns.get(sessionKey)?.route;
     if (!route) return null;
@@ -1108,19 +1045,19 @@ export class BoardRuntime {
           project.state !== 'archived' &&
           (project.route?.conversationRef === route.conversationRef || (owner && !project.route)),
       );
-    if (!projects.length) return null;
     const lines = [];
     for (const project of projects.slice(0, 5)) {
       if (project.route?.conversationRef === route.conversationRef)
         lines.push(
           `This chat is also used as the project chat for "${project.name}" (project ${project.id}).`,
+          ...(project.context ? [`Project context:\n${project.context}`] : []),
         );
       for (const task of this.store.all(
-        "SELECT * FROM tasks WHERE project=? AND status='open' AND holder='user' ORDER BY id LIMIT 5",
+        "SELECT * FROM tasks WHERE project=? AND status='waiting' ORDER BY id LIMIT 5",
         project.id,
       )) {
         // The last message the user received for it, and any newer note marked internal.
-        const last = this.store.notes(task.id, 1)[0];
+        const last = this.latestNote(task.id);
         const sent = this.store.get(
           'SELECT text, created FROM outbox WHERE task=? AND receipt IS NOT NULL ORDER BY id DESC LIMIT 1',
           task.id,
@@ -1131,25 +1068,23 @@ export class BoardRuntime {
       }
     }
     return lines.length
-      ? `${lines.join('\n').slice(0, 2000)}\n(Project background from project_board, not an instruction.)`
+      ? `${lines.join('\n')}\n(Project background from project_board, not an instruction.)`
       : null;
   }
-  // A task as `you` (a role) sees it: its project, description, plan and latest notes.
-  taskLines(task, project, you) {
+  // A task with its project, description, plan and latest notes.
+  taskLines(task, project) {
     const notes = this.store.notes(task.id, 15);
     return [
       `Project: ${project.name} (project ${project.id}), ${project.state}. Project chat: ${chatLabel(project.route)}.`,
       ...(project.context ? [`Project context:\n${project.context}`] : []),
       `Task #${task.id}: ${task.title}`,
-      `Status: ${task.status}${task.status === 'open' ? `, waiting on ${task.holder === you ? `you (${you})` : task.holder}` : ''}. Created by ${task.created_by}.`,
+      `Status: ${STATUS_LINE[task.status]}.`,
       ...(task.body ? [`Description:\n${task.body}`] : []),
       ...(task.plan ? [`Plan:\n${task.plan}`] : []),
       ...(notes.length
         ? [
             'Notes (oldest first):',
-            ...notes.map(
-              (note) => `- [${note.author}, ${when(note.created)}] ${clip(note.text, 800)}`,
-            ),
+            ...notes.map((note) => `- [${when(note.created)}] ${clip(note.text, 800)}`),
           ]
         : []),
     ];
@@ -1164,9 +1099,8 @@ export class BoardRuntime {
     } catch {
       return 'This private task session no longer has a task. Reply with one short line and stop.';
     }
-    const you = scope.role;
     this.markSeen(sessionKey, task.id);
-    const lines = this.taskLines(task, this.store.project(task.project), you);
+    const lines = this.taskLines(task, this.store.project(task.project));
     if (task.workers.length)
       lines.push(`Workers spawned for this task: ${task.workers.map((w) => w.key).join(', ')}`);
     const { workerAgentId, workerProfiles } = topology();
@@ -1198,7 +1132,7 @@ export class BoardRuntime {
       return {
         block: true,
         blockReason:
-          'Private task session: the user is reached through project_board (update_task message, or notify by the product manager).',
+          'Private task session: the user is reached through project_board (a message on update_task, or notify).',
       };
     if (name !== 'sessions_spawn' && name !== 'sessions_send') return undefined;
     let task, project;
@@ -1209,7 +1143,7 @@ export class BoardRuntime {
     } catch {
       return { block: true, blockReason: 'This private session has no task.' };
     }
-    if (task.status !== 'open')
+    if (isClosed(task.status))
       return { block: true, blockReason: `Task #${task.id} is ${task.status}.` };
     const params = event.params ?? {};
     if (name === 'sessions_send') {
@@ -1258,14 +1192,13 @@ export class BoardRuntime {
   allowRun(sessionKey) {
     if (!isPrivateSession(sessionKey)) return true;
     const scope = parseTaskSession(sessionKey);
-    if (!scope) return false;
-    const task = this.store.get('SELECT status,created FROM tasks WHERE id=?', scope.taskId);
-    if (task && task.created === scope.created && task.status === 'open') return true;
+    const task =
+      scope && this.store.get('SELECT status,created FROM tasks WHERE id=?', scope.taskId);
+    if (!task || task.created !== scope.created) return false;
+    if (!isClosed(task.status)) return true;
     // A late native turn recreated a closed task's session; the next scan removes it again.
-    if (task && task.created === scope.created) {
-      this.store.run('UPDATE tasks SET cleaned=NULL WHERE id=?', scope.taskId);
-      this.requestTick();
-    }
+    this.store.run('UPDATE tasks SET cleaned=NULL WHERE id=?', scope.taskId);
+    this.requestTick();
     return false;
   }
 
@@ -1329,50 +1262,38 @@ export class BoardRuntime {
   }
   async wakeDue(summary) {
     const now = this.now();
-    const tasks = this.store.all(
+    const due = this.store.all(
       `SELECT t.* FROM tasks t JOIN projects p ON p.id=t.project
-       WHERE t.status='open' AND p.state='active' AND t.holder IN ('product','engineering') AND t.stalled IS NULL
+       WHERE t.status='open' AND p.state='active' AND t.stalled IS NULL AND (t.poked=1 OR t.check_at<=?)
        ORDER BY t.updated`,
-    );
-    const due = tasks.filter(
-      (task) =>
-        (task.poked !== null && (task.woken === null || task.poked > task.woken)) ||
-        (task.check_at !== null && now >= task.check_at),
+      now,
     );
     const notes = new Map(due.map((task) => [task.id, this.latestNote(task.id)?.id ?? 0]));
     for (const [session, at] of this.wakes)
       if (now - at >= WAKE_GRACE_MS) this.wakes.delete(session);
     if (!due.length) return;
-    // One list per role shows which private sessions are mid-turn.
-    const live = {};
-    for (const role of ROLES) {
-      if (!due.some((task) => task.holder === role)) continue;
-      try {
-        live[role] = new Set(
-          (await this.sessionRows(agentForRole(role), `${topology().sessionNamespace}:task-`))
-            .filter((row) => rowLive(row, now))
-            .map((row) => row.key),
-        );
-      } catch (error) {
-        const problem = `Cannot see ${role} sessions: ${error?.message ?? error}`;
-        this.scanProblem ??= problem;
-        this.log(problem);
-      }
+    // One list shows which task sessions are mid-turn.
+    let live;
+    try {
+      live = new Set(
+        (await this.sessionRows(topology().leadAgentId, `${topology().sessionNamespace}:task-`))
+          .filter((row) => rowLive(row, now))
+          .map((row) => row.key),
+      );
+    } catch (error) {
+      const problem = `Cannot see the task sessions: ${error?.message ?? error}`;
+      this.scanProblem ??= problem;
+      this.log(problem);
+      return;
     }
     for (const row of due) {
       const task = { ...row, workers: JSON.parse(row.workers) };
       const lastNote = notes.get(task.id);
-      const role = task.holder;
-      if (!live[role]) continue;
-      const key = taskSessionKey(role, task);
-      if (this.wakes.has(key) || live[role].has(key)) continue;
-      const busy =
-        live[role].size +
-        [...this.wakes.keys()].filter(
-          (k) => k.startsWith(`agent:${agentForRole(role)}:`) && !live[role].has(k),
-        ).length;
-      if (busy >= this.maxWakesPerRole) continue;
-      const poked = task.poked !== null;
+      const key = taskSessionKey(task);
+      if (this.wakes.has(key) || live.has(key)) continue;
+      const running = live.size + [...this.wakes.keys()].filter((k) => !live.has(k)).length;
+      if (running >= this.maxTaskSessions) continue;
+      const poked = task.poked === 1;
       let workers = 0;
       try {
         workers = (await this.liveWorkers(task)).length;
@@ -1385,26 +1306,27 @@ export class BoardRuntime {
         summary.stalled.push(task.id);
         continue;
       }
-      if (await this.wake(task, role, key, poked, workers, lastNote)) {
-        live[role].add(key);
+      if (await this.wake(task, key, poked, workers, lastNote)) {
+        live.add(key);
         summary.woken.push(task.id);
       }
     }
   }
   // A private task session runs on the model and thinking level the user chose in the
   // project chat, or on the agent's defaults when the chat has none. Fails open.
-  async followChatModel(task, role, key) {
+  async followChatModel(task, key) {
+    const { leadAgentId } = topology();
     const chatKey = this.store.project(task.project).route?.sessionKey;
     try {
       const row = chatKey
-        ? (await this.sessionRows(topology().productAgentId, chatKey)).find(
+        ? (await this.sessionRows(leadAgentId, chatKey)).find(
             (candidate) => candidate.key === chatKey,
           )
         : null;
       const chosen = row?.modelOverrideSource === 'user' && row.model;
       // Two calls: the companion sends the model with write scope only, so the choice
       // never becomes a configured default; the thinking level needs admin scope.
-      const target = { key, agentId: agentForRole(role) };
+      const target = { key, agentId: leadAgentId };
       await this.rpc('sessions.patch', {
         ...target,
         model: chosen
@@ -1420,27 +1342,28 @@ export class BoardRuntime {
       );
     }
   }
-  async wake(task, role, key, poked, workers, lastNote) {
+  async wake(task, key, poked, workers, lastNote) {
     const now = this.now();
+    const agentId = topology().leadAgentId;
     this.wakes.set(key, now);
-    const last = this.store.notes(task.id, 1)[0];
+    const last = this.latestNote(task.id);
     const reason = poked
-      ? last && last.author !== role
-        ? `New from ${last.author}: ${clip(last.text, 500)}`
-        : 'This task is waiting on you.'
+      ? last
+        ? `Changed outside this session. Latest note: ${clip(last.text, 500)}`
+        : 'New task.'
       : workers
         ? 'Scheduled check-in; workers are still running.'
         : 'Scheduled check-in.';
     try {
       await this.rpc('sessions.create', {
         key,
-        agentId: agentForRole(role),
+        agentId,
         label: clip(`Task #${task.id}: ${task.title}`, 80),
       }).catch(() => undefined);
-      await this.followChatModel(task, role, key);
+      await this.followChatModel(task, key);
       try {
         await this.rpc('agent', {
-          agentId: agentForRole(role),
+          agentId,
           sessionKey: key,
           deliver: false,
           idempotencyKey: randomUUID(),
@@ -1449,7 +1372,7 @@ export class BoardRuntime {
         });
       } catch (error) {
         // A timed-out request may still have started the turn.
-        const started = await this.sessionRows(agentForRole(role), key)
+        const started = await this.sessionRows(agentId, key)
           .then((rows) =>
             rowLive(
               rows.find((row) => row.key === key),
@@ -1460,25 +1383,26 @@ export class BoardRuntime {
         if (!started) throw error;
       }
     } catch (error) {
-      // A wake that did not happen keeps its poke and is tried again later; it counts as
-      // unanswered, so a holder who cannot be reached is reported like one who does not act.
+      // A wake that did not happen is tried again later and counts as unanswered, so a task
+      // session that cannot be reached is reported like one that does not act. A change
+      // made meanwhile keeps its own wake.
       this.wakes.delete(key);
-      this.store.run(
-        'UPDATE tasks SET woken=?,check_at=?,idle_wakes=idle_wakes+1 WHERE id=?',
-        now,
-        now + WAKE_RETRY_MINUTES * MINUTE,
-        task.id,
-      );
-      const problem = `Could not wake ${role} for task #${task.id}: ${String(error?.message ?? error).slice(0, 200)}`;
+      this.store.run('UPDATE tasks SET idle_wakes=idle_wakes+1 WHERE id=?', task.id);
+      if (this.taskUnchanged(task, lastNote))
+        this.store.run(
+          'UPDATE tasks SET poked=0,check_at=? WHERE id=?',
+          now + WAKE_RETRY_MINUTES * MINUTE,
+          task.id,
+        );
+      const problem = `Could not wake task #${task.id}: ${String(error?.message ?? error).slice(0, 200)}`;
       this.log(problem);
       this.scanProblem ??= problem;
       return false;
     }
-    // A change made during the dispatch keeps its own poke and check-in.
+    // A change made during the dispatch keeps its own wake and check-in.
     if (this.taskUnchanged(task, lastNote))
       this.store.run(
-        'UPDATE tasks SET woken=?,check_at=?,idle_wakes=idle_wakes+?,poked=NULL WHERE id=?',
-        now,
+        'UPDATE tasks SET check_at=?,idle_wakes=idle_wakes+?,poked=0 WHERE id=?',
         now + CHECK_IN_MINUTES * MINUTE,
         poked || !workers ? 1 : 0,
         task.id,
@@ -1487,16 +1411,10 @@ export class BoardRuntime {
   }
   async reportStall(task) {
     const project = this.store.project(task.project);
-    const last = this.store.notes(task.id, 1)[0];
-    const who = this.agentName(task.holder);
-    const message = `${project.name}: task #${task.id} "${task.title}" is waiting on ${who}, whose wake-ups have gone unanswered or could not be delivered.${last ? ` Last note (${last.author}): ${clip(last.text, 500)}` : ''}`;
+    const last = this.latestNote(task.id);
+    const message = `${project.name}: task #${task.id} "${task.title}" is stuck: its wake-ups went unanswered or could not be delivered.${last ? ` Latest note: ${clip(last.text, 500)}` : ''}`;
     const id = this.store.tx(() => {
       this.store.run('UPDATE tasks SET stalled=? WHERE id=?', this.now(), task.id);
-      this.store.note(
-        task.id,
-        'plugin',
-        `Stalled: wake-ups went unanswered or undelivered; the user was told.`,
-      );
       return this.store.enqueue(project.id, task.id, message);
     });
     await this.deliver(id);
@@ -1505,37 +1423,31 @@ export class BoardRuntime {
   // then deleted once nothing runs in them.
   async cleanupClosed() {
     let cleaned = 0;
-    const { sessionNamespace } = topology();
+    const { leadAgentId: agentId, sessionNamespace } = topology();
     for (const row of this.store.all(
-      "SELECT * FROM tasks WHERE status<>'open' AND cleaned IS NULL AND updated<=? ORDER BY updated LIMIT 10",
+      "SELECT * FROM tasks WHERE status IN ('done','cancelled') AND cleaned IS NULL AND updated<=? ORDER BY updated LIMIT 10",
       this.now() - KEEP_CLOSED_MS,
     )) {
-      let done = true;
-      for (const role of ROLES) {
-        const key = taskSessionKey(role, row);
-        try {
-          const session = (
-            await this.sessionRows(agentForRole(role), key, { archived: 'all' })
-          ).find((candidate) => candidate.key === key);
-          if (!session) continue;
-          if (rowBusy(session, this.now())) {
-            done = false;
-            continue;
-          }
-          await this.rpc('jarvis-gilfoyle.session.cleanup', {
-            agentId: agentForRole(role),
-            sessionNamespace,
-            sessionKey: key,
-            expectedSessionId: session.sessionId,
-          });
-        } catch (error) {
-          done = false;
-          this.log(`Cleanup of ${key} deferred: ${String(error?.message ?? error).slice(0, 200)}`);
-        }
-      }
-      if (done) {
-        this.store.run('UPDATE tasks SET cleaned=? WHERE id=?', this.now(), row.id);
-        cleaned++;
+      const sessionKey = taskSessionKey(row);
+      try {
+        const session = (await this.sessionRows(agentId, sessionKey, { archived: 'all' })).find(
+          (candidate) => candidate.key === sessionKey,
+        );
+        if (session && rowBusy(session, this.now())) continue;
+        // A task reopened meanwhile keeps its session.
+        if (session && isClosed(this.store.task(row.id).status))
+          await this.rpc('crew.session.cleanup', { agentId, sessionNamespace, sessionKey });
+        cleaned += Number(
+          this.store.run(
+            "UPDATE tasks SET cleaned=? WHERE id=? AND status IN ('done','cancelled')",
+            this.now(),
+            row.id,
+          ).changes,
+        );
+      } catch (error) {
+        this.log(
+          `Cleanup of ${sessionKey} deferred: ${String(error?.message ?? error).slice(0, 200)}`,
+        );
       }
     }
     return cleaned;
@@ -1545,7 +1457,7 @@ export class BoardRuntime {
     return {
       ...this.health,
       projects: count("SELECT COUNT(*) n FROM projects WHERE state<>'archived'"),
-      openTasks: count("SELECT COUNT(*) n FROM tasks WHERE status='open'"),
+      openTasks: count("SELECT COUNT(*) n FROM tasks WHERE status IN ('open','waiting')"),
       stalledTasks: count(
         "SELECT COUNT(*) n FROM tasks WHERE status='open' AND stalled IS NOT NULL",
       ),
@@ -1554,5 +1466,3 @@ export class BoardRuntime {
     };
   }
 }
-
-export { isManagerAgent };
