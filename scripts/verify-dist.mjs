@@ -11,9 +11,8 @@ plugin.register({
   pluginConfig: {
     statePath: ':memory:',
     enabled: false,
-    productAgentId: 'product',
-    engineeringAgentId: 'engineering',
-    ownerChat: { channel: 'test', accountId: 'product', to: 'test:owner' },
+    leadAgentId: 'lead',
+    ownerChat: { channel: 'test', accountId: 'default', to: 'test:owner' },
     worker: { agentId: 'worker', profiles: [{ id: 'routine', model: 'provider/worker' }] },
   },
   logger: { warn() {} },
@@ -31,22 +30,15 @@ plugin.register({
   },
 });
 assert.deepEqual(tools, ['project_board']);
-assert.deepEqual(methods, [
-  'jarvis-gilfoyle.board.call',
-  'jarvis-gilfoyle.board.tick',
-  'jarvis-gilfoyle.board.health',
-]);
-assert.deepEqual(services, ['jarvis-gilfoyle-board']);
+assert.deepEqual(methods, ['crew.board.call', 'crew.board.tick', 'crew.board.health']);
+assert.deepEqual(services, ['crew-board']);
 assert(hooks.includes('before_tool_call') && hooks.includes('before_prompt_build'));
 const store = new Store(':memory:');
-assert.equal(store.get('PRAGMA user_version').user_version, 19);
+assert.equal(store.get('PRAGMA user_version').user_version, 1);
 store.close();
 const manifest = JSON.parse(readFileSync(new URL('../openclaw.plugin.json', import.meta.url)));
 assert.deepEqual(manifest.skills, ['./skills']);
 assert.deepEqual(manifest.contracts.tools, ['project_board']);
-const skill = readFileSync(
-  new URL('../skills/project-coordination/SKILL.md', import.meta.url),
-  'utf8',
-);
-assert.match(skill, /^name: project-coordination$/m);
+const skill = readFileSync(new URL('../skills/crew-lead/SKILL.md', import.meta.url), 'utf8');
+assert.match(skill, /^name: crew-lead$/m);
 console.log('Compiled distribution verified');

@@ -1,7 +1,7 @@
 [project]
-name = "jarvis-gilfoyle-docs"
+name = "crew-docs"
 version = "0.1.0"
-description = "Documentation build environment for OpenClaw Jarvis-Gilfoyle"
+description = "Documentation build environment for OpenClaw Crew"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "zensical==0.0.68",

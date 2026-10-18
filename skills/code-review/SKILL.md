@@ -7,7 +7,7 @@ description: "How to review a change (PR, branch or diff) and how to act on revi
 
 ## The repository's rules come first
 
-Before anything else, read the repository's `AGENTS.md` and any standards it points to; managers also read the project context. They override every default in this skill, and you must apply them strictly. For example, when the repository says it has a single installation and wants no compatibility code, backward compatibility is not a requirement and compatibility code is a defect to remove. The defaults below apply only where the repository says nothing.
+Before anything else, read the repository's `AGENTS.md` and any standards it points to, and the project context when you have one. They override every default in this skill, and you must apply them strictly. For example, when the repository says it has a single installation and wants no compatibility code, backward compatibility is not a requirement and compatibility code is a defect to remove. The defaults below apply only where the repository says nothing.
 
 ## Reviewing a change
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { harness, JARVIS_DM, JARVIS_GROUP, MINUTE, ref } from './support/harness.ts';
+import { harness, LEAD_DM, LEAD_GROUP, MINUTE, ref } from './support/harness.ts';
 import { taskSessionKey } from '../src/topology.ts';
 import { companionMethodAllowed, companionScopes } from '../src/bridge-methods.ts';
 import { Store } from '../src/store.ts';
@@ -9,259 +9,183 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const key = (h, role, id) => taskSessionKey(role, h.runtime.store.task(id));
-const agent = { product: 'main', engineering: 'gilfoyle' };
+const key = (h, id) => taskSessionKey(h.runtime.store.task(id));
 async function project(
   h,
   name = 'Quote Desk',
-  chat = { session: JARVIS_GROUP, target: 'telegram:-200' },
+  chat = { session: LEAD_GROUP, target: 'telegram:-200' },
 ) {
-  await h.userMessage('main', chat.session, chat.target);
-  const created = await h.call('main', chat.session, { operation: 'create_project', name });
-  h.endTurn('main', chat.session);
+  await h.userMessage(chat.session, chat.target);
+  const created = await h.call(chat.session, { operation: 'create_project', name });
+  h.endTurn(chat.session);
   return created.project;
 }
+const addTask = (h, title, extra = {}) =>
+  h.call(LEAD_DM, { operation: 'add_task', project: 'quote-desk', title, ...extra });
 
-test('a request goes from the user to engineering and back, and the user hears the result', async () => {
+test('a request is worked in its task session and the user hears the result', async () => {
   const h = await harness();
   const id = await project(h);
   assert.equal(id, 'quote-desk');
   assert.match(
-    (await h.call('main', JARVIS_DM, { operation: 'list' })).projects[0].chat,
+    (await h.call(LEAD_DM, { operation: 'list' })).projects[0].chat,
     /telegram chat telegram:-200/,
   );
 
-  // The user asks for work in the project chat; Jarvis records it for engineering.
-  await h.userMessage('main', JARVIS_GROUP, 'telegram:-200');
-  const { task } = await h.call('main', JARVIS_GROUP, {
+  // The user asks for work in the project chat; the lead records it.
+  await h.userMessage(LEAD_GROUP, 'telegram:-200');
+  const { task } = await h.call(LEAD_GROUP, {
     operation: 'add_task',
     title: 'Add CSV export',
     body: 'Quotes can be exported as CSV.',
   });
-  h.endTurn('main', JARVIS_GROUP);
+  h.endTurn(LEAD_GROUP);
 
-  // The scan wakes Gilfoyle in the task's private session.
-  const gKey = key(h, 'engineering', task);
+  // The scan wakes the lead at once in the task's private session.
+  const tKey = key(h, task);
   assert.deepEqual((await h.tick()).woken, [task]);
   const run = h.native.runs.at(-1);
-  assert.equal(run.sessionKey, gKey);
-  assert.equal(run.deliver, false);
-  assert.match(run.message, /^PROJECT TASK task-\d+-/);
-  const card = await h.hooks.before_prompt_build({}, { agentId: 'gilfoyle', sessionKey: gKey });
-  assert.match(card.prependContext, /Task #\d+: Add CSV export/);
-  assert.match(card.prependContext, /waiting on you \(engineering\)/);
+  assert.deepEqual([run.agentId, run.sessionKey, run.deliver], ['lead', tKey, false]);
+  assert.match(run.message, /^PROJECT TASK task-\d+-[0-9a-z]+\nNew task\./);
+  const card = await h.hooks.before_prompt_build({}, { agentId: 'lead', sessionKey: tKey });
+  assert.match(card.prependContext, /Task #\d+: Add CSV export\nStatus: open, your turn\./);
   assert.match(card.prependContext, /sol-low = openai\/gpt-5\.6-sol/);
-  assert.match(card.prependSystemContext, /product manager is Jarvis \(agent id main\)/);
-  assert.ok(card.prependSystemContext.startsWith(`Session ${gKey}.\n`));
+  assert.ok(card.prependSystemContext.startsWith(`Session ${tKey}.\nIn project work`));
+  assert.match(card.prependSystemContext, /private task session/);
 
   // A running session is not woken again.
   h.advance(2 * MINUTE);
   assert.deepEqual((await h.tick()).woken, []);
 
-  // Gilfoyle spawns a worker with a profile id; the board applies the profile and records it.
-  const spawned = await h.spawn(gKey, { agentId: 'opencode', model: 'sol-low', task: 'Implement' });
-  assert.equal(spawned.params.model, 'openai/gpt-5.6-sol');
-  assert.equal(spawned.params.thinking, 'low');
-  assert.equal(spawned.params.runtime, 'acp');
+  // A worker spawned with a profile id gets the profile and is recorded on the task.
+  const spawned = await h.spawn(tKey, { agentId: 'opencode', model: 'sol-low', task: 'Implement' });
+  assert.deepEqual(
+    [spawned.params.model, spawned.params.thinking, spawned.params.runtime],
+    ['openai/gpt-5.6-sol', 'low', 'acp'],
+  );
   assert.deepEqual(
     h.runtime.store.task(task).workers.map((w) => w.key),
     [spawned.childSessionKey],
   );
 
-  // Gilfoyle cannot close the user's request; he hands it to product with the result.
-  const close = await h.call('gilfoyle', gKey, {
-    operation: 'update_task',
-    status: 'done',
-    note: 'Done',
-  });
-  assert.match(close.error, /Only the product manager closes tasks it created/);
-  const handed = await h.call('gilfoyle', gKey, {
-    operation: 'update_task',
-    holder: 'product',
-    note: 'CSV export merged in PR #7; tests pass.',
-  });
-  assert.equal(handed.waitingOn, 'product');
-  h.endTurn('gilfoyle', gKey);
-
-  // Jarvis is woken with the note.
-  const jKey = key(h, 'product', task);
-  assert.deepEqual((await h.tick()).woken, [task]);
-  assert.match(h.native.runs.at(-1).message, /New from engineering: CSV export merged/);
-
-  // From the private session, closing needs the message for the user; the worker must be done.
-  const noMessage = await h.call('main', jKey, {
-    operation: 'update_task',
-    status: 'done',
-    note: 'Accepted',
-  });
-  assert.match(noMessage.error, /needs message/);
-  const busy = await h.call('main', jKey, {
-    operation: 'update_task',
-    status: 'done',
-    note: 'Accepted',
-    message: 'CSV export is live.',
-  });
-  assert.match(busy.error, /still has 1 running worker/);
+  // Closing needs a message for the user, and the worker must have finished.
+  const close = (extra) =>
+    h.call(tKey, { operation: 'update_task', status: 'done', note: 'Merged PR #7', ...extra });
+  assert.match((await close()).error, /Closing a task needs message/);
+  assert.match((await close({ message: 'CSV export is live.' })).error, /1 running worker/);
   h.advance(3 * MINUTE);
   h.native.session(spawned.childSessionKey).hasActiveRun = false;
-  const done = await h.call('main', jKey, {
-    operation: 'update_task',
-    status: 'done',
-    note: 'Accepted',
-    message: 'CSV export is live.',
-  });
-  assert.equal(done.status, 'done');
-  assert.equal(done.message.state, 'sent');
+  const done = await close({ message: 'CSV export is live.' });
+  assert.deepEqual([done.status, done.message.state], ['done', 'sent']);
   const sent = h.native.sent.at(-1);
-  assert.equal(sent.conversationRef, ref('b'));
-  assert.equal(sent.message, 'CSV export is live.');
-  assert.equal(sent.agentId, 'main');
+  assert.deepEqual(
+    [sent.conversationRef, sent.message, sent.agentId],
+    [ref('b'), 'CSV export is live.', 'lead'],
+  );
 
-  // Private replies never reach a chat, and closed task sessions are kept for a week,
-  // then cleaned up.
-  assert.equal(h.hooks.message_sending({}, { sessionKey: jKey }).cancel, true);
+  // Private replies never reach a chat; the closed task's session is kept for a week.
+  assert.equal(h.hooks.message_sending({}, { sessionKey: tKey }).cancel, true);
   h.endAllRuns();
   await h.tick();
   assert.deepEqual(h.native.cleaned, []);
   h.advance(7 * 24 * 60 * MINUTE);
   await h.tick();
-  assert.deepEqual(h.native.cleaned.sort(), [gKey, jKey].sort());
+  assert.deepEqual(h.native.cleaned, [tKey]);
 
-  // A late native turn that recreates a closed task's session is blocked, and the next scan
-  // removes the session again.
-  h.native.session(gKey);
-  assert.equal(h.hooks.before_agent_run({}, { sessionKey: gKey }).outcome, 'block');
+  // A late native turn that recreates it is refused, and the next scan removes it again.
+  h.native.session(tKey);
+  assert.equal(h.hooks.before_agent_run({}, { sessionKey: tKey }).outcome, 'block');
   await h.tick();
-  assert.equal(h.native.cleaned.filter((k) => k === gKey).length, 2);
+  assert.deepEqual(h.native.cleaned, [tKey, tKey]);
 });
 
-test('a question goes to the user with its message, and the answer goes back to engineering', async () => {
+test('asking the user sends the question, and the answer noted in the chat wakes the task', async () => {
   const h = await harness();
   await project(h);
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Pricing page',
-  });
+  const { task } = await addTask(h, 'Pricing page');
   await h.tick();
-  const gKey = key(h, 'engineering', task);
-  await h.call('gilfoyle', gKey, {
-    operation: 'update_task',
-    holder: 'product',
-    note: 'Monthly or yearly prices?',
-  });
-  h.endAllRuns();
-  await h.tick();
-  const jKey = key(h, 'product', task);
+  const tKey = key(h, task);
 
-  // Engineering never asks the user directly; product must include the question.
-  const direct = await h.call('gilfoyle', gKey, {
-    operation: 'update_task',
-    holder: 'user',
-    note: 'Ask',
-  });
-  assert.match(direct.error, /Only the product manager hands tasks to the user/);
-  const missing = await h.call('main', jKey, {
-    operation: 'update_task',
-    holder: 'user',
-    note: 'Asked the user',
-  });
-  assert.match(missing.error, /needs message/);
-  const asked = await h.call('main', jKey, {
-    operation: 'update_task',
-    holder: 'user',
-    note: 'Asked the user about billing period',
-    message: 'Should the pricing page show monthly or yearly prices?',
-  });
-  assert.equal(asked.waitingOn, 'user');
+  const ask = (extra) =>
+    h.call(tKey, {
+      operation: 'update_task',
+      status: 'waiting',
+      note: 'Asked about billing period',
+      ...extra,
+    });
+  assert.match((await ask()).error, /Asking the user needs message/);
+  const asked = await ask({ message: 'Should the pricing page show monthly or yearly prices?' });
+  assert.equal(asked.status, 'waiting');
   assert.equal(h.native.sent.at(-1).conversationRef, ref('b'));
   h.endAllRuns();
 
-  // Nobody is woken while the user holds the task.
+  // Nothing is woken while the task waits on the user.
   h.advance(2 * 60 * MINUTE);
   assert.deepEqual((await h.tick()).woken, []);
 
-  // A message that has not been delivered, and a later note, do not hide the question.
+  // A message that was not delivered, and a later note, do not hide the question.
   h.native.sendStatus = () => 'throw';
-  await h.call('main', jKey, { operation: 'notify', message: 'Undelivered reminder' });
+  await h.call(tKey, { operation: 'notify', message: 'Undelivered reminder' });
   h.native.sendStatus = () => 'sent';
-  await h.call('main', jKey, { operation: 'update_task', note: 'Remind on Monday' });
+  await h.call(tKey, { operation: 'update_task', note: 'Remind on Monday' });
   h.endAllRuns();
 
-  // In the project chat Jarvis sees the waiting question and records the answer.
-  const context = await h.userMessage('main', JARVIS_GROUP, 'telegram:-200');
+  // In the project chat the lead sees the project and the waiting question.
+  const context = (await h.userMessage(LEAD_GROUP, 'telegram:-200')).prependContext;
+  assert.match(context, /also used as the project chat for "Quote Desk"/);
   assert.match(
-    context.prependContext,
-    /— latest internal note \([^)]+\), not sent to them: Remind on Monday/,
+    context,
+    /Waiting on the user: Quote Desk task #\d+ "Pricing page" — last message they received \([^)]+\): Should the pricing page show monthly or yearly prices\? — latest note \([^)]+\): Remind on Monday/,
   );
-  assert.doesNotMatch(context.prependContext, /Undelivered reminder/);
-  assert.match(context.prependContext, /also used as the project chat for "Quote Desk"/);
-  // It shows the question as the user received it, not the internal handover note.
-  assert.match(
-    context.prependContext,
-    /Waiting on the user: Quote Desk task #\d+ "Pricing page" — last message they received \([^)]+\): Should the pricing page show monthly or yearly prices\? —/,
-  );
-  assert.doesNotMatch(context.prependContext, /billing period/);
-  const answered = await h.call('main', JARVIS_GROUP, {
+  assert.doesNotMatch(context, /Undelivered reminder|billing period/);
+
+  const answered = await h.call(LEAD_GROUP, {
     operation: 'update_task',
     task,
-    holder: 'engineering',
+    status: 'open',
     note: 'User: yearly, with a monthly toggle.',
   });
-  assert.equal(answered.waitingOn, 'engineering');
-  h.endTurn('main', JARVIS_GROUP);
+  assert.equal(answered.status, 'open');
+  h.endTurn(LEAD_GROUP);
   assert.deepEqual((await h.tick()).woken, [task]);
-  assert.match(h.native.runs.at(-1).message, /User: yearly/);
+  assert.match(
+    h.native.runs.at(-1).message,
+    /Changed outside this session\. Latest note: User: yearly/,
+  );
 });
 
 test('in the project chat the reply is the message; elsewhere a message is required', async () => {
   const h = await harness();
   await project(h);
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Logo',
-  });
-  await h.userMessage('main', JARVIS_GROUP, 'telegram:-200');
-  const cancelled = await h.call('main', JARVIS_GROUP, {
+  const { task } = await addTask(h, 'Logo');
+  await h.userMessage(LEAD_GROUP, 'telegram:-200');
+  const cancelled = await h.call(LEAD_GROUP, {
     operation: 'update_task',
     task,
     status: 'cancelled',
     note: 'User dropped it',
   });
   assert.equal(cancelled.status, 'cancelled');
-  assert.equal(h.native.sent.length, 0);
-  const asked = await h.call('main', JARVIS_GROUP, {
-    operation: 'add_task',
-    title: 'Colour',
-    holder: 'product',
-  });
-  const question = await h.call('main', JARVIS_GROUP, {
+  const asked = await h.call(LEAD_GROUP, { operation: 'add_task', title: 'Colour' });
+  const question = await h.call(LEAD_GROUP, {
     operation: 'update_task',
     task: asked.task,
-    holder: 'user',
+    status: 'waiting',
     note: 'Asked the user',
     message: 'Which colour?',
   });
   assert.equal(question.message.state, 'not sent');
-  const notified = await h.call('main', JARVIS_GROUP, { operation: 'notify', message: 'FYI' });
+  const notified = await h.call(LEAD_GROUP, { operation: 'notify', message: 'FYI' });
   assert.equal(notified.message.state, 'not sent');
   assert.equal(h.native.sent.length, 0);
-  // With no board message, the chat context labels the handover note as internal.
-  h.endTurn('main', JARVIS_GROUP);
-  const context = await h.userMessage('main', JARVIS_GROUP, 'telegram:-200');
-  assert.match(
-    context.prependContext,
-    /"Colour" — latest internal note \([^)]+\), not sent to them: Asked/,
-  );
+  // With no board message, the chat context labels the note as internal.
+  h.endTurn(LEAD_GROUP);
+  const context = await h.userMessage(LEAD_GROUP, 'telegram:-200');
+  assert.match(context.prependContext, /"Colour" — latest note \([^)]+\): Asked/);
 
-  const other = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Font',
-  });
-  await h.userMessage('main', JARVIS_DM, 'telegram:100');
-  const fromDm = await h.call('main', JARVIS_DM, {
+  const other = await addTask(h, 'Font');
+  await h.userMessage(LEAD_DM, 'telegram:100');
+  const fromDm = await h.call(LEAD_DM, {
     operation: 'update_task',
     task: other.task,
     status: 'cancelled',
@@ -270,179 +194,115 @@ test('in the project chat the reply is the message; elsewhere a message is requi
   assert.match(fromDm.error, /needs message/);
 });
 
-test('a task is handed over only by its holder and from its latest state', async () => {
+test('a status change needs a note and is decided on the latest state', async () => {
   const h = await harness();
   await project(h);
-  // Jarvis asks the user before engineering starts.
-  await h.userMessage('main', JARVIS_GROUP, 'telegram:-200');
-  const { task } = await h.call('main', JARVIS_GROUP, {
-    operation: 'add_task',
-    title: 'Summary header',
-    holder: 'product',
-  });
-  await h.call('main', JARVIS_GROUP, {
-    operation: 'update_task',
-    task,
-    holder: 'user',
-    note: 'Asked for the header text',
-  });
-  h.endTurn('main', JARVIS_GROUP);
-  const taken = await h.call('gilfoyle', key(h, 'engineering', task), {
-    operation: 'update_task',
-    holder: 'product',
-    note: 'Need the exact text',
-  });
-  assert.match(taken.error, /waiting on user; add a note instead/);
-
-  // A private product session reads the task; meanwhile the chat records the user's answer.
-  const jKey = key(h, 'product', task);
-  await h.hooks.before_prompt_build({}, { agentId: 'main', sessionKey: jKey });
-  await h.userMessage('main', JARVIS_GROUP, 'telegram:-200');
-  await h.call('main', JARVIS_GROUP, {
-    operation: 'update_task',
-    task,
-    holder: 'engineering',
-    note: 'User: "Copied Summary"',
-  });
-  const stale = await h.call('main', jKey, {
-    operation: 'update_task',
-    holder: 'user',
-    note: 'Ask again',
-    message: 'What should the header say?',
-  });
+  const { task } = await addTask(h, 'Summary header');
+  const tKey = key(h, task);
   assert.match(
-    stale.error,
-    /changed since you read it \(latest from product: User: "Copied Summary"\)/,
+    (await h.call(tKey, { operation: 'update_task', status: 'waiting', message: 'Header text?' }))
+      .error,
+    /Changing the status needs a note/,
   );
-  await h.call('main', jKey, { operation: 'show' });
-  const current = await h.call('main', jKey, {
-    operation: 'update_task',
-    holder: 'product',
-    note: 'Taking it back to check the wording',
-  });
-  assert.equal(current.waitingOn, 'product');
+  // The task session reads the task; meanwhile the chat records the user's direction.
+  await h.hooks.before_prompt_build({}, { agentId: 'lead', sessionKey: tKey });
+  await h.userMessage(LEAD_GROUP, 'telegram:-200');
+  await h.call(LEAD_GROUP, { operation: 'update_task', task, note: 'User: "Copied Summary"' });
+  const close = () =>
+    h.call(tKey, { operation: 'update_task', status: 'done', note: 'Done', message: 'Done.' });
+  assert.match(
+    (await close()).error,
+    /changed since you read it \(latest note: User: "Copied Summary"\)/,
+  );
+  await h.call(tKey, { operation: 'show' });
+  assert.equal((await close()).status, 'done');
 });
 
 test('private task sessions follow the model chosen in the project chat', async () => {
   const h = await harness();
   await project(h);
-  const chat = h.native.session(JARVIS_GROUP);
+  const chat = h.native.session(LEAD_GROUP);
   Object.assign(chat, {
     model: 'gpt-5.6-sol',
     modelProvider: 'openai',
     modelOverrideSource: 'user',
     thinkingLevel: 'high',
   });
-  await h.userMessage('main', JARVIS_GROUP, 'telegram:-200');
-  const { task } = await h.call('main', JARVIS_GROUP, { operation: 'add_task', title: 'Totals' });
-  h.endTurn('main', JARVIS_GROUP);
+  const one = await addTask(h, 'Totals');
   await h.tick();
-  const gKey = key(h, 'engineering', task);
+  const k1 = key(h, one.task);
   assert.deepEqual(h.native.patches.slice(-2), [
-    { key: gKey, agentId: 'gilfoyle', model: 'openai/gpt-5.6-sol' },
-    { key: gKey, agentId: 'gilfoyle', thinkingLevel: 'high' },
+    { key: k1, agentId: 'lead', model: 'openai/gpt-5.6-sol' },
+    { key: k1, agentId: 'lead', thinkingLevel: 'high' },
   ]);
 
-  // Without a choice in the chat the session goes back to the agent's defaults.
+  // Without a choice in the chat a session goes back to the agent's defaults.
   Object.assign(chat, { modelOverrideSource: null, thinkingLevel: undefined });
-  await h.call('gilfoyle', gKey, { operation: 'update_task', holder: 'product', note: 'Done?' });
-  h.endAllRuns();
+  const two = await addTask(h, 'Tax');
   await h.tick();
-  const jKey = key(h, 'product', task);
+  const k2 = key(h, two.task);
   assert.deepEqual(h.native.patches.slice(-2), [
-    { key: jKey, agentId: 'main', model: null },
-    { key: jKey, agentId: 'main', thinkingLevel: null },
+    { key: k2, agentId: 'lead', model: null },
+    { key: k2, agentId: 'lead', thinkingLevel: null },
   ]);
 
   // A message in the project chat records the session OpenClaw routed it to; a message in
   // another chat (the DM) does not.
-  const moved = 'agent:main:telegram:group:-200:reset-scope';
+  const moved = 'agent:lead:telegram:group:-200:reset-scope';
   h.native.session(moved);
-  await h.userMessage('main', moved, 'telegram:-200');
-  await h.userMessage('main', JARVIS_DM, 'telegram:100');
+  await h.userMessage(moved, 'telegram:-200');
+  await h.userMessage(LEAD_DM, 'telegram:100');
   assert.equal(h.runtime.store.project('quote-desk').route.sessionKey, moved);
 
   // The companion lets sessions.patch touch only the model settings of private sessions.
-  assert(companionMethodAllowed('sessions.patch', { key: gKey, agentId: 'gilfoyle', model: null }));
+  assert(companionMethodAllowed('sessions.patch', { key: k1, agentId: 'lead', model: null }));
   assert(
-    !companionMethodAllowed('sessions.patch', { key: JARVIS_GROUP, agentId: 'main', model: null }),
+    !companionMethodAllowed('sessions.patch', { key: LEAD_GROUP, agentId: 'lead', model: null }),
   );
-  assert(!companionMethodAllowed('sessions.patch', { key: gKey, agentId: 'gilfoyle', label: 'x' }));
+  assert(!companionMethodAllowed('sessions.patch', { key: k1, agentId: 'lead', label: 'x' }));
   assert(
     !companionMethodAllowed('sessions.patch', {
-      key: gKey,
-      agentId: 'gilfoyle',
+      key: k1,
+      agentId: 'lead',
       model: null,
       thinkingLevel: null,
     }),
   );
   // A model is never sent with admin scope, which would make it the configured default.
-  assert(!companionScopes('sessions.patch', { key: gKey, model: 'x' }).includes('operator.admin'));
+  assert(!companionScopes('sessions.patch', { key: k1, model: 'x' }).includes('operator.admin'));
   assert(
-    companionScopes('sessions.patch', { key: gKey, thinkingLevel: 'high' }).includes(
+    companionScopes('sessions.patch', { key: k1, thinkingLevel: 'high' }).includes(
       'operator.admin',
     ),
   );
 });
 
-test('roles, project isolation and closed tasks are enforced', async () => {
+test('task sessions stay in their project, and closed tasks change only by reopening', async () => {
   const h = await harness();
   await project(h, 'Alpha');
-  await project(h, 'Beta', { session: JARVIS_DM, target: 'telegram:100' });
-  const a = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'alpha',
-    title: 'A1',
-  });
-  const b = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'beta',
-    title: 'B1',
-  });
-  const gKey = key(h, 'engineering', a.task);
-
+  await project(h, 'Beta', { session: LEAD_DM, target: 'telegram:100' });
+  const a = await h.call(LEAD_DM, { operation: 'add_task', project: 'alpha', title: 'A1' });
+  const b = await h.call(LEAD_DM, { operation: 'add_task', project: 'beta', title: 'B1' });
+  const aKey = key(h, a.task);
   assert.match(
-    (await h.call('gilfoyle', gKey, { operation: 'create_project', name: 'X' })).error,
-    /Only the product manager creates/,
-  );
-  assert.match(
-    (await h.call('gilfoyle', gKey, { operation: 'notify', message: 'hi' })).error,
-    /Only the product manager messages/,
-  );
-  assert.match(
-    (await h.call('gilfoyle', gKey, { operation: 'update_project', state: 'paused' })).error,
-    /may only change the project context/,
-  );
-  assert.equal(
-    (await h.call('gilfoyle', gKey, { operation: 'update_project', context: 'Repo: /src/alpha' }))
-      .project,
-    'alpha',
-  );
-  assert.match(
-    (await h.call('gilfoyle', gKey, { operation: 'update_task', task: b.task, note: 'x' })).error,
+    (await h.call(aKey, { operation: 'update_task', task: b.task, note: 'x' })).error,
     /only on its own project/,
   );
   assert.match(
-    (await h.call('gilfoyle', gKey, { operation: 'show', project: 'beta' })).error,
+    (await h.call(aKey, { operation: 'show', project: 'beta' })).error,
     /only on its own project/,
   );
   assert.deepEqual(
-    (await h.call('gilfoyle', gKey, { operation: 'list' })).projects.map((p) => p.id),
+    (await h.call(aKey, { operation: 'list' })).projects.map((p) => p.id),
     ['alpha'],
   );
   assert.match(
-    (await h.call('main', key(h, 'engineering', a.task), { operation: 'list' })).error,
-    /belongs to the other manager/,
+    (await h.call(aKey, { operation: 'create_project', name: 'Gamma' })).error,
+    /not from a task session/,
   );
   assert.equal(h.tool('opencode', 'agent:opencode:x'), null);
 
-  // Handover and closing carry notes; closed tasks are read-only until product reopens them.
-  assert.match(
-    (await h.call('main', JARVIS_DM, { operation: 'update_task', task: a.task, holder: 'product' }))
-      .error,
-    /needs a note/,
-  );
-  await h.call('main', JARVIS_DM, {
+  await h.call(LEAD_DM, {
     operation: 'update_task',
     task: a.task,
     status: 'cancelled',
@@ -450,59 +310,38 @@ test('roles, project isolation and closed tasks are enforced', async () => {
     message: 'Dropped A1',
   });
   assert.match(
-    (await h.call('gilfoyle', gKey, { operation: 'update_task', note: 'more' })).error,
-    /is cancelled/,
+    (await h.call(aKey, { operation: 'update_task', note: 'more' })).error,
+    /is cancelled; reopen/,
   );
-  const reopened = await h.call('main', JARVIS_DM, {
+  h.endAllRuns();
+  const reopened = await h.call(LEAD_DM, {
     operation: 'update_task',
     task: a.task,
     status: 'open',
     note: 'Back on',
   });
-  assert.equal(reopened.waitingOn, 'engineering');
-  // Engineering can close its own tasks without a user message.
-  const own = await h.call('gilfoyle', gKey, {
-    operation: 'add_task',
-    title: 'Refactor',
-    holder: 'engineering',
-  });
-  assert.equal(
-    (
-      await h.call('gilfoyle', gKey, {
-        operation: 'update_task',
-        task: own.task,
-        status: 'done',
-        note: 'Refactored',
-      })
-    ).status,
-    'done',
-  );
+  assert.equal(reopened.status, 'open');
+  assert(h.runtime.store.task(a.task).poked);
 });
 
-test('a holder who does nothing is reported once, and another manager’s note wakes it once more', async () => {
+test('a task session that does nothing is reported once, and a change from the chat wakes it once more', async () => {
   const h = await harness();
   await project(h);
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Stuck',
-  });
+  const { task } = await addTask(h, 'Stuck');
   for (let i = 0; i < 3; i++) {
     assert.deepEqual((await h.tick()).woken, [task]);
     h.endAllRuns();
     h.advance(61 * MINUTE);
   }
-  const stall = await h.tick();
-  assert.deepEqual(stall.stalled, [task]);
+  assert.deepEqual((await h.tick()).stalled, [task]);
   assert.match(
     h.native.sent.at(-1).message,
-    /waiting on Gilfoyle, whose wake-ups have gone unanswered/,
+    /task #\d+ "Stuck" is stuck: its wake-ups went unanswered/,
   );
   h.advance(3 * 60 * MINUTE);
   assert.deepEqual(await h.tick().then((s) => [s.woken, s.stalled]), [[], []]);
   assert.equal(h.native.sent.length, 1);
-  // Someone else's note clears the stall and wakes the holder once more.
-  await h.call('main', JARVIS_DM, { operation: 'update_task', task, note: 'Any news?' });
+  await h.call(LEAD_DM, { operation: 'update_task', task, note: 'Any news?' });
   assert.deepEqual((await h.tick()).woken, [task]);
   h.endAllRuns();
   h.advance(61 * MINUTE);
@@ -510,43 +349,30 @@ test('a holder who does nothing is reported once, and another manager’s note w
   assert.equal(h.native.sent.length, 2);
 });
 
-test('notes from the other manager do not hide a holder who never acts', async () => {
+test('notes from other sessions do not hide a task session that never acts', async () => {
   const h = await harness();
   await project(h);
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Unanswered',
-  });
+  const { task } = await addTask(h, 'Unanswered');
   for (let i = 0; i < 3; i++) {
     assert.deepEqual((await h.tick()).woken, [task]);
     h.endAllRuns();
     h.advance(5 * MINUTE);
-    await h.call('main', JARVIS_DM, { operation: 'update_task', task, note: `Ping ${i}` });
+    await h.call(LEAD_DM, { operation: 'update_task', task, note: `Ping ${i}` });
   }
   assert.deepEqual((await h.tick()).stalled, [task]);
-  // The holder's own action answers its wakes.
-  const gKey = key(h, 'engineering', task);
-  await h.call('gilfoyle', gKey, { operation: 'update_task', note: 'Back on it' });
+  // The task session's own action answers its wakes.
+  await h.call(key(h, task), { operation: 'update_task', note: 'Back on it' });
   assert.equal(h.runtime.store.task(task).idle_wakes, 0);
 });
 
 test('check_in_minutes schedules the next wake, and running workers do not count as idle', async () => {
   const h = await harness();
   await project(h);
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'CI',
-  });
+  const { task } = await addTask(h, 'CI');
   await h.tick();
-  const gKey = key(h, 'engineering', task);
-  await h.spawn(gKey, { agentId: 'opencode', model: 'astra', task: 'Build' });
-  await h.call('gilfoyle', gKey, {
-    operation: 'update_task',
-    note: 'Waiting for CI',
-    check_in_minutes: 10,
-  });
+  const tKey = key(h, task);
+  await h.spawn(tKey, { agentId: 'opencode', model: 'astra', task: 'Build' });
+  await h.call(tKey, { operation: 'update_task', note: 'Waiting for CI', check_in_minutes: 10 });
   h.endAllRuns();
   h.advance(9 * MINUTE);
   assert.deepEqual((await h.tick()).woken, []);
@@ -558,80 +384,48 @@ test('check_in_minutes schedules the next wake, and running workers do not count
     h.advance(61 * MINUTE);
     assert.deepEqual((await h.tick()).stalled, []);
   }
-  // A wake for someone else's change counts even while workers run.
+  // A wake for a change from another session counts even while workers run.
   const before = h.runtime.store.task(task).idle_wakes;
-  await h.call('main', JARVIS_DM, { operation: 'update_task', task, note: 'Status?' });
+  await h.call(LEAD_DM, { operation: 'update_task', task, note: 'Status?' });
   h.endAllRuns();
   h.advance(2 * MINUTE);
   assert.deepEqual((await h.tick()).woken, [task]);
   assert.equal(h.runtime.store.task(task).idle_wakes, before + 1);
 });
 
-test('a task the product manager keeps for itself wakes it at once, and its workers are recorded', async () => {
-  const h = await harness();
-  await project(h);
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Fix totals',
-    holder: 'product',
-  });
-  assert.deepEqual((await h.tick()).woken, [task]);
-  const jKey = key(h, 'product', task);
-  assert.equal(h.native.runs.at(-1).sessionKey, jKey);
-  const spawned = await h.spawn(jKey, { agentId: 'opencode', model: 'sol-low', task: 'Fix' });
-  assert.equal(spawned.params.model, 'openai/gpt-5.6-sol');
-  assert.deepEqual(
-    h.runtime.store.task(task).workers.map((w) => w.key),
-    [spawned.childSessionKey],
-  );
-});
-
 test('the plan is kept on the task, shown on its card, and replaced or cleared as a whole', async () => {
   const h = await harness();
   await project(h);
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Full UI',
-  });
-  const gKey = key(h, 'engineering', task);
+  const { task } = await addTask(h, 'Full UI');
+  const tKey = key(h, task);
   const plan = '[~] 1 Layout — worker A → PR #1\n[ ] 2 Forms — after 1';
-  const set = await h.call('gilfoyle', gKey, { operation: 'update_task', plan });
-  assert(!set.error, set.error);
-  const card = await h.hooks.before_prompt_build({}, { agentId: 'gilfoyle', sessionKey: gKey });
+  assert(!(await h.call(tKey, { operation: 'update_task', plan })).error);
+  const card = await h.hooks.before_prompt_build({}, { agentId: 'lead', sessionKey: tKey });
   assert.match(
     card.prependContext,
     /Plan:\n\[~\] 1 Layout — worker A → PR #1\n\[ \] 2 Forms — after 1/,
   );
-  assert.equal((await h.call('main', JARVIS_DM, { operation: 'show', task })).task.plan, plan);
+  assert.equal((await h.call(LEAD_DM, { operation: 'show', task })).task.plan, plan);
   // Other updates keep it; a new plan replaces it; an empty one clears it.
-  await h.call('gilfoyle', gKey, { operation: 'update_task', note: 'Layout merged' });
+  await h.call(tKey, { operation: 'update_task', note: 'Layout merged' });
   assert.equal(h.runtime.store.task(task).plan, plan);
-  await h.call('gilfoyle', gKey, { operation: 'update_task', plan: '[x] 1 Layout\n[~] 2 Forms' });
+  await h.call(tKey, { operation: 'update_task', plan: '[x] 1 Layout\n[~] 2 Forms' });
   assert.equal(h.runtime.store.task(task).plan, '[x] 1 Layout\n[~] 2 Forms');
-  await h.call('gilfoyle', gKey, { operation: 'update_task', plan: '' });
-  assert.equal(h.runtime.store.task(task).plan, '');
-  assert.equal((await h.call('main', JARVIS_DM, { operation: 'show', task })).task.plan, undefined);
+  await h.call(tKey, { operation: 'update_task', plan: '' });
+  assert.equal((await h.call(LEAD_DM, { operation: 'show', task })).task.plan, undefined);
 });
 
 test('the card shows the project context and the description in full', async () => {
   const h = await harness();
   await project(h);
   const long = (end) => `${'x'.repeat(7980)} ${end}`;
-  await h.call('main', JARVIS_DM, {
+  await h.call(LEAD_DM, {
     operation: 'update_project',
     project: 'quote-desk',
     context: long('CONTEXT-END'),
   });
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Long',
-    body: long('BODY-END'),
-  });
-  const gKey = key(h, 'engineering', task);
-  const card = await h.hooks.before_prompt_build({}, { agentId: 'gilfoyle', sessionKey: gKey });
+  const { task } = await addTask(h, 'Long', { body: long('BODY-END') });
+  const card = await h.hooks.before_prompt_build({}, { agentId: 'lead', sessionKey: key(h, task) });
   assert.match(card.prependContext, /CONTEXT-END/);
   assert.match(card.prependContext, /BODY-END/);
 });
@@ -639,18 +433,10 @@ test('the card shows the project context and the description in full', async () 
 test('cancelling stops the task’s workers', async () => {
   const h = await harness();
   await project(h);
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Big',
-  });
+  const { task } = await addTask(h, 'Big');
   await h.tick();
-  const w = await h.spawn(key(h, 'engineering', task), {
-    agentId: 'opencode',
-    model: 'sol-low',
-    task: 'x',
-  });
-  await h.call('main', JARVIS_DM, {
+  const w = await h.spawn(key(h, task), { agentId: 'opencode', model: 'sol-low', task: 'x' });
+  await h.call(LEAD_DM, {
     operation: 'update_task',
     task,
     status: 'cancelled',
@@ -663,15 +449,9 @@ test('cancelling stops the task’s workers', async () => {
 test('worker spawns need a profile, respect the limit, and are refused when paused', async () => {
   const h = await harness();
   await project(h);
-  const t1 = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'One',
-  });
-  const k = await (async () => {
-    await h.tick();
-    return key(h, 'engineering', t1.task);
-  })();
+  const { task } = await addTask(h, 'One');
+  await h.tick();
+  const k = key(h, task);
   assert.match(
     (await h.spawn(k, { agentId: 'opencode', model: 'gpt-9', task: 'x' })).blocked,
     /profile id: sol-low, astra/,
@@ -684,49 +464,27 @@ test('worker spawns need a profile, respect the limit, and are refused when paus
   );
   // Spawning some other agent (research) is not the worker pool and is allowed.
   assert.ok((await h.spawn(k, { agentId: 'researcher', task: 'look' })).childSessionKey);
-  await h.call('main', JARVIS_DM, {
-    operation: 'update_project',
-    project: 'quote-desk',
-    state: 'paused',
-  });
+  await h.call(LEAD_DM, { operation: 'update_project', project: 'quote-desk', state: 'paused' });
   assert.match((await h.spawn(k, { agentId: 'researcher', task: 'look' })).blocked, /paused/);
   // sessions_send only reaches the task's own workers; the message tool is refused.
-  const send = await h.hooks.before_tool_call(
-    { toolName: 'sessions_send', params: { sessionKey: JARVIS_DM } },
-    { agentId: 'gilfoyle', sessionKey: k },
-  );
-  assert.equal(send.block, true);
-  const msg = await h.hooks.before_tool_call(
-    { toolName: 'message', params: {} },
-    { agentId: 'gilfoyle', sessionKey: k },
-  );
-  assert.equal(msg.block, true);
+  const guard = (toolName, params) =>
+    h.hooks.before_tool_call({ toolName, params }, { agentId: 'lead', sessionKey: k });
+  assert.equal((await guard('sessions_send', { sessionKey: LEAD_DM })).block, true);
+  assert.equal((await guard('message', {})).block, true);
 });
 
-test('paused projects are not woken; resuming asks the holders to look again', async () => {
+test('paused projects are not woken; resuming wakes their open tasks', async () => {
   const h = await harness();
   await project(h);
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Later',
-  });
-  await h.call('main', JARVIS_DM, {
-    operation: 'update_project',
-    project: 'quote-desk',
-    state: 'paused',
-  });
+  const { task } = await addTask(h, 'Later');
+  await h.call(LEAD_DM, { operation: 'update_project', project: 'quote-desk', state: 'paused' });
   h.advance(3 * 60 * MINUTE);
   assert.deepEqual((await h.tick()).woken, []);
-  await h.call('main', JARVIS_DM, {
-    operation: 'update_project',
-    project: 'quote-desk',
-    state: 'active',
-  });
+  await h.call(LEAD_DM, { operation: 'update_project', project: 'quote-desk', state: 'active' });
   assert.deepEqual((await h.tick()).woken, [task]);
   assert.match(
     (
-      await h.call('main', JARVIS_DM, {
+      await h.call(LEAD_DM, {
         operation: 'update_project',
         project: 'quote-desk',
         state: 'archived',
@@ -736,19 +494,11 @@ test('paused projects are not woken; resuming asks the holders to look again', a
   );
 });
 
-test('each manager runs at most the configured number of private sessions at once', async () => {
-  const h = await harness({ config: { maxWakesPerRole: 1 } });
+test('at most the configured number of task sessions run at once', async () => {
+  const h = await harness({ config: { maxTaskSessions: 1 } });
   await project(h);
-  const one = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'One',
-  });
-  const two = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'Two',
-  });
+  const one = await addTask(h, 'One');
+  const two = await addTask(h, 'Two');
   assert.deepEqual((await h.tick()).woken, [one.task]);
   h.advance(2 * MINUTE);
   assert.deepEqual((await h.tick()).woken, []);
@@ -761,12 +511,9 @@ test('messages fall back to the owner DM, never rebind, and retry with the same 
   await project(h);
   // The project chat rejects messages: straight to the owner DM, with the project name.
   h.native.sendStatus = (p) => (p.conversationRef === ref('b') ? 'suppressed' : 'sent');
-  const rejected = await h.call('main', JARVIS_DM, {
-    operation: 'notify',
-    project: 'quote-desk',
-    message: 'Hello',
-  });
-  assert.equal(rejected.state, 'sent');
+  const notify = (message) =>
+    h.call(LEAD_DM, { operation: 'notify', project: 'quote-desk', message });
+  assert.equal((await notify('Hello')).state, 'sent');
   assert.deepEqual(
     [h.native.sent.at(-1).conversationRef, h.native.sent.at(-1).message],
     [ref('a'), '[Quote Desk] Hello'],
@@ -776,12 +523,7 @@ test('messages fall back to the owner DM, never rebind, and retry with the same 
   // Errors retry on the project chat with one operation id, then fall back.
   let tries = 0;
   h.native.sendStatus = (p) => (p.conversationRef === ref('b') ? (tries++, 'throw') : 'queued');
-  const retrying = await h.call('main', JARVIS_DM, {
-    operation: 'notify',
-    project: 'quote-desk',
-    message: 'Again',
-  });
-  assert.equal(retrying.state, 'retrying');
+  assert.equal((await notify('Again')).state, 'retrying');
   h.advance(3 * MINUTE);
   await h.tick();
   h.advance(5 * MINUTE);
@@ -798,41 +540,31 @@ test('messages fall back to the owner DM, never rebind, and retry with the same 
 test('files follow their message, and the message joins the session of the chat it reached', async () => {
   const h = await harness();
   await project(h);
-  const dir = mkdtempSync(join(tmpdir(), 'jg-files-'));
+  const dir = mkdtempSync(join(tmpdir(), 'crew-files-'));
   const png = join(dir, 'architecture.png');
   writeFileSync(png, 'png-bytes');
   try {
     // Paths are checked when the message is recorded.
     const notify = (attachments) =>
-      h.call('main', JARVIS_DM, {
-        operation: 'notify',
-        project: 'quote-desk',
-        message: 'See',
-        attachments,
-      });
+      h.call(LEAD_DM, { operation: 'notify', project: 'quote-desk', message: 'See', attachments });
     assert.match((await notify(['relative.png'])).error, /absolute path/);
     assert.match((await notify([join(dir, 'missing.png')])).error, /not found/);
     assert.match((await notify([dir])).error, /not a file/);
     assert.match((await notify([png, png, png, png, png])).error, /at most 4/);
-    const { task } = await h.call('main', JARVIS_DM, {
-      operation: 'add_task',
-      project: 'quote-desk',
-      title: 'Architecture',
-    });
-    const jKey = key(h, 'product', task);
+    const { task } = await addTask(h, 'Architecture');
+    const tKey = key(h, task);
     assert.match(
-      (await h.call('main', jKey, { operation: 'update_task', note: 'x', attachments: [png] }))
-        .error,
+      (await h.call(tKey, { operation: 'update_task', note: 'x', attachments: [png] })).error,
       /sent with a message/,
     );
 
     // A failed file send retries the whole message with the same identities. Meanwhile
-    // Jarvis is talking in the project chat, so its session is busy.
-    const chat = h.native.session(JARVIS_GROUP);
+    // the lead is talking in the project chat, so its session is busy.
+    const chat = h.native.session(LEAD_GROUP);
     chat.deliveryContext = { channel: 'telegram', to: 'telegram:-200', accountId: 'default' };
     chat.hasActiveRun = true;
     h.native.fail.add('message.action');
-    const closed = await h.call('main', jKey, {
+    const closed = await h.call(tKey, {
       operation: 'update_task',
       status: 'done',
       note: 'Accepted',
@@ -859,15 +591,15 @@ test('files follow their message, and the message joins the session of the chat 
         file.params.filename,
         Buffer.from(file.params.buffer, 'base64').toString(),
       ],
-      ['telegram', 'telegram:-200', 'main', 'architecture.png', 'png-bytes'],
+      ['telegram', 'telegram:-200', 'lead', 'architecture.png', 'png-bytes'],
     );
     assert.equal(
       h.runtime.store.get("SELECT state FROM outbox WHERE text='Here is the architecture.'").state,
       'handed',
     );
 
-    // Once the chat's turn ends, the scan adds the message to that session as Jarvis's own
-    // reply, with a MEDIA line for the file; only once.
+    // Once the chat's turn ends, the scan adds the message to that session as the lead's
+    // own reply, with a MEDIA line for the file; only once.
     chat.hasActiveRun = false;
     await h.tick();
     await h.tick();
@@ -875,32 +607,32 @@ test('files follow their message, and the message joins the session of the chat 
     const entry = h.native.transcript[0];
     assert.deepEqual(
       [entry.agentId, entry.sessionKey, entry.sessionId, entry.message.role],
-      ['main', JARVIS_GROUP, chat.sessionId, 'assistant'],
+      ['lead', LEAD_GROUP, chat.sessionId, 'assistant'],
     );
     assert.equal(entry.message.content[0].text, `Here is the architecture.\n\nMEDIA:${png}`);
     assert.notEqual(entry.message.provider, 'openclaw');
 
     // A message that fell back to the owner DM joins the DM's session, as sent there.
-    h.native.session(JARVIS_DM).deliveryContext = { channel: 'telegram', to: 'telegram:100' };
+    h.native.session(LEAD_DM).deliveryContext = { channel: 'telegram', to: 'telegram:100' };
     h.native.sendStatus = (p) => (p.conversationRef === ref('b') ? 'suppressed' : 'sent');
-    await h.call('main', JARVIS_DM, { operation: 'notify', project: 'quote-desk', message: 'DM' });
+    await h.call(LEAD_DM, { operation: 'notify', project: 'quote-desk', message: 'DM' });
     assert.deepEqual(
       [h.native.transcript.at(-1).sessionKey, h.native.transcript.at(-1).message.content[0].text],
-      [JARVIS_DM, '[Quote Desk] DM'],
+      [LEAD_DM, '[Quote Desk] DM'],
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-// A project bound to the group chat, whose session is Jarvis's and has a chat history.
+// A project bound to the group chat, whose session is the lead's and has a chat history.
 async function chatProject(h) {
   await project(h);
-  const chat = h.native.session(JARVIS_GROUP);
+  const chat = h.native.session(LEAD_GROUP);
   chat.deliveryContext = { channel: 'telegram', to: 'telegram:-200', accountId: 'default' };
-  h.native.history[JARVIS_GROUP] = [];
+  h.native.history[LEAD_GROUP] = [];
   const say = (role, text) =>
-    h.native.history[JARVIS_GROUP].push({
+    h.native.history[LEAD_GROUP].push({
       role,
       content: role === 'user' ? text : [{ type: 'text', text }],
       timestamp: h.now(),
@@ -914,21 +646,17 @@ test('a project chat message is rewritten for the conversation before it is sent
   say('user', 'Old chatter');
   h.advance(MINUTE);
   say('user', 'Please add CSV export');
-  const { task } = await h.call('main', JARVIS_DM, {
-    operation: 'add_task',
-    project: 'quote-desk',
-    title: 'CSV export',
-  });
+  const { task } = await addTask(h, 'CSV export');
   h.advance(MINUTE);
   say('assistant', 'Recorded.');
-  h.native.history[JARVIS_GROUP].push({ role: 'toolResult', content: 'x', timestamp: h.now() });
+  h.native.history[LEAD_GROUP].push({ role: 'toolResult', content: 'x', timestamp: h.now() });
   say('user', 'Also, the logo looks off');
   const calls = [];
   h.runtime.adapt = async (input) => {
     calls.push(input);
     return 'The CSV export you asked for is done.';
   };
-  const closed = await h.call('main', key(h, 'product', task), {
+  const closed = await h.call(key(h, task), {
     operation: 'update_task',
     status: 'done',
     note: 'Accepted',
@@ -942,7 +670,7 @@ test('a project chat message is rewritten for the conversation before it is sent
   assert.doesNotMatch(message, /Old chatter/);
   assert.match(
     message,
-    /User: Please add CSV export\n.*Jarvis: Recorded\.\n.*User: Also, the logo looks off/,
+    /User: Please add CSV export\n.*You: Recorded\.\n.*User: Also, the logo looks off/,
   );
   assert.match(message, /Task #\d+: CSV export/);
   assert.match(message, /The message to send:\nCSV export is merged\.$/);
@@ -966,7 +694,7 @@ test('a rewrite waits within the turn for a busy or changing chat; failures and 
     chat.hasActiveRun = false;
   };
   const notify = () =>
-    h.call('main', JARVIS_DM, { operation: 'notify', project: 'quote-desk', message: 'Heads up' });
+    h.call(LEAD_DM, { operation: 'notify', project: 'quote-desk', message: 'Heads up' });
   chat.hasActiveRun = true;
   assert.equal((await notify()).state, 'sent');
   assert.deepEqual([slept, calls, h.native.sent.at(-1).message], [10000, 1, 'Rewrite 1']);
@@ -1009,8 +737,8 @@ test('a rewrite waits within the turn for a busy or changing chat; failures and 
   );
 });
 
-test('the rewrite runs as the product manager, with his workspace files and the configured model', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'jg-workspace-'));
+test('the rewrite runs as the lead, with its workspace files and the configured model', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'crew-workspace-'));
   writeFileSync(join(dir, 'SOUL.md'), 'Calm and precise.');
   writeFileSync(join(dir, 'USER.md'), 'Explain in plain words.');
   try {
@@ -1024,10 +752,10 @@ test('the rewrite runs as the product manager, with his workspace files and the 
       },
     });
     await chatProject(h);
-    await h.call('main', JARVIS_DM, { operation: 'notify', project: 'quote-desk', message: 'Hi' });
+    await h.call(LEAD_DM, { operation: 'notify', project: 'quote-desk', message: 'Hi' });
     assert.equal(h.native.sent.at(-1).message, 'Rewritten');
     const [{ agentId, model, extraSystemPrompt }] = calls;
-    assert.deepEqual([agentId, model], ['main', 'openai/gpt-5.6-terra']);
+    assert.deepEqual([agentId, model], ['lead', 'openai/gpt-5.6-terra']);
     assert.match(
       extraSystemPrompt,
       /Keep every fact[\s\S]*Calm and precise\.\n\nExplain in plain words\.$/,
@@ -1058,74 +786,56 @@ test('a long chat keeps the request and the newest messages for the rewrite', as
 
 test('use_this_chat binds only the chat of the message that started the turn', async () => {
   const h = await harness();
-  await project(h, 'Quote Desk', { session: JARVIS_DM, target: 'telegram:100' });
+  await project(h, 'Quote Desk', { session: LEAD_DM, target: 'telegram:100' });
   assert.equal(h.runtime.store.project('quote-desk').route.conversationRef, ref('a'));
   // A turn with no new message (cron, heartbeat) has no chat to bind.
-  await h.hooks.before_prompt_build({}, { agentId: 'main', sessionKey: JARVIS_GROUP });
-  assert.match(
-    (await h.call('main', JARVIS_GROUP, { operation: 'update_project', use_this_chat: true }))
-      .error,
-    /needs a current user message/,
-  );
+  await h.hooks.before_prompt_build({}, { agentId: 'lead', sessionKey: LEAD_GROUP });
+  const bind = (session) => h.call(session, { operation: 'update_project', use_this_chat: true });
+  assert.match((await bind(LEAD_GROUP)).error, /needs a current user message/);
   // A new message in the group, then use_this_chat.
-  await h.userMessage('main', JARVIS_GROUP, 'telegram:-200');
-  await h.call('main', JARVIS_GROUP, { operation: 'update_project', use_this_chat: true });
+  await h.userMessage(LEAD_GROUP, 'telegram:-200');
+  await bind(LEAD_GROUP);
   assert.equal(h.runtime.store.project('quote-desk').route.conversationRef, ref('b'));
   // Private sessions have no chat.
-  const { task } = await h.call('main', JARVIS_DM, { operation: 'add_task', title: 'x' });
-  const jKey = key(h, 'product', task);
-  assert.match(
-    (await h.call('main', jKey, { operation: 'update_project', use_this_chat: true })).error,
-    /needs a current user message/,
-  );
+  const { task } = await h.call(LEAD_DM, { operation: 'add_task', title: 'x' });
+  assert.match((await bind(key(h, task))).error, /needs a current user message/);
 });
 
-test('the plugin stays out of personal work and non-manager agents', async () => {
+test('the plugin stays out of personal work and other agents', async () => {
   const h = await harness();
-  // Jarvis spawning or messaging from a personal chat is untouched.
+  // The lead spawning or messaging from a personal chat is untouched.
+  const lead = { agentId: 'lead', sessionKey: LEAD_DM };
   assert.equal(
     await h.hooks.before_tool_call(
       { toolName: 'sessions_spawn', params: { agentId: 'opencode' } },
-      { agentId: 'main', sessionKey: JARVIS_DM },
+      lead,
     ),
     undefined,
   );
   assert.equal(
-    await h.hooks.before_tool_call(
-      { toolName: 'message', params: {} },
-      { agentId: 'main', sessionKey: JARVIS_DM },
-    ),
+    await h.hooks.before_tool_call({ toolName: 'message', params: {} }, lead),
     undefined,
   );
-  assert.equal(h.hooks.message_sending({}, { sessionKey: JARVIS_DM }), undefined);
-  assert.equal(h.hooks.before_agent_run({}, { sessionKey: JARVIS_DM }), undefined);
+  assert.equal(h.hooks.message_sending({}, { sessionKey: LEAD_DM }), undefined);
+  assert.equal(h.hooks.before_agent_run({}, { sessionKey: LEAD_DM }), undefined);
   // Other agents get nothing.
+  const other = { agentId: 'opencode', sessionKey: 'agent:opencode:x' };
+  assert.equal(await h.hooks.before_prompt_build({}, other), undefined);
   assert.equal(
-    await h.hooks.before_prompt_build({}, { agentId: 'opencode', sessionKey: 'agent:opencode:x' }),
+    await h.hooks.before_tool_call({ toolName: 'sessions_spawn', params: {} }, other),
     undefined,
   );
-  assert.equal(
-    await h.hooks.before_tool_call(
-      { toolName: 'sessions_spawn', params: {} },
-      { agentId: 'opencode', sessionKey: 'agent:opencode:x' },
-    ),
-    undefined,
-  );
-  // A personal chat without projects gets only the role line.
-  const personal = await h.userMessage('main', 'agent:main:telegram:direct:999', 'telegram:999');
+  // A personal chat without projects gets only the session and role lines.
+  const personal = await h.userMessage('agent:lead:telegram:direct:999', 'telegram:999');
   assert.equal(personal.prependContext, undefined);
   assert.match(
     personal.prependSystemContext,
-    /project work .* adds to your usual role and does not replace it/,
-  );
-  assert.match(
-    personal.prependSystemContext,
-    /engineering manager is Gilfoyle \(agent id gilfoyle\)/,
+    /^Session agent:lead:telegram:direct:999\.\nIn project work .* you are the lead.*adds to your usual role and does not replace it/,
   );
 });
 
-test('the board file persists across restarts and a foreign database is refused', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'board-'));
+test('the board file persists across restarts and a database of another schema is refused', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'crew-board-'));
   const path = join(dir, 'state.sqlite');
   const first = new Store(path);
   first.run("INSERT INTO projects(id,name,created,updated) VALUES('kept','Kept',1,1)");
@@ -1138,17 +848,17 @@ test('the board file persists across restarts and a foreign database is refused'
   const other = new DatabaseSync(foreign);
   other.exec('PRAGMA user_version=99');
   other.close();
-  assert.throws(() => new Store(foreign), /not a project board \(schema 99, expected 19\)/);
+  assert.throws(() => new Store(foreign), /not a project board \(schema 99, expected 1\)/);
   rmSync(dir, { recursive: true, force: true });
 });
 
 test('registrations in one process share the board, so a chat seen by the hooks binds the tool call', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'board-'));
+  const dir = mkdtempSync(join(tmpdir(), 'crew-board-'));
   const h = await harness({ config: { statePath: join(dir, 'state.sqlite') } });
   // OpenClaw runs the hooks from its gateway registration and the tool from another one.
   const otherTool = h.registerAgain();
-  await h.userMessage('main', JARVIS_DM, 'telegram:100');
-  const run = (args) => otherTool({ agentId: 'main', sessionKey: JARVIS_DM }).execute('call', args);
+  await h.userMessage(LEAD_DM, 'telegram:100');
+  const run = (args) => otherTool({ agentId: 'lead', sessionKey: LEAD_DM }).execute('call', args);
   const created = JSON.parse(
     (await run({ operation: 'create_project', name: 'Quote Desk' })).content[0].text,
   );
@@ -1157,58 +867,57 @@ test('registrations in one process share the board, so a chat seen by the hooks 
   rmSync(dir, { recursive: true, force: true });
 });
 
+const registration = (plugin, statePath, scanMs, services) =>
+  plugin.register({
+    pluginConfig: {
+      statePath,
+      leadAgentId: 'lead',
+      ownerChat: { channel: 'telegram', accountId: 'default', to: 'telegram:100' },
+      scanMs,
+    },
+    config: {},
+    logger: { warn() {} },
+    registerTool() {},
+    registerGatewayMethod() {},
+    registerService: (service) => services.push(service),
+    on() {},
+  });
+const fakeBridge = (name, seen) => ({
+  stopped: false,
+  failingSince: null,
+  request: async (method) => {
+    seen.push(`${name}:${method}`);
+    return { sessions: [], conversations: [] };
+  },
+  stop() {
+    this.stopped = true;
+    seen.push(`${name}:stop`);
+  },
+});
+
 test('a reload gives the shared board a fresh companion and runtime from the new code', async () => {
   const { default: plugin, testHooks } = await import('../src/index.ts');
-  const dir = mkdtempSync(join(tmpdir(), 'jg-reload-'));
-  const fakeBridge = (name, seen) => ({
-    stopped: false,
-    request: async (method) => {
-      seen.push(`${name}:${method}`);
-      return { sessions: [], conversations: [] };
-    },
-    stop() {
-      this.stopped = true;
-      seen.push(`${name}:stop`);
-    },
-  });
-  const register = () => {
-    const services = [];
-    plugin.register({
-      pluginConfig: {
-        statePath: join(dir, 'state.sqlite'),
-        productAgentId: 'main',
-        engineeringAgentId: 'gilfoyle',
-        ownerChat: { channel: 'telegram', accountId: 'default', to: 'telegram:100' },
-        scanMs: 3_600_000,
-      },
-      config: {},
-      logger: { warn() {} },
-      registerTool() {},
-      registerGatewayMethod() {},
-      registerService: (service) => services.push(service),
-      on() {},
-    });
-    return services[0];
-  };
+  const dir = mkdtempSync(join(tmpdir(), 'crew-reload-'));
   const seen = [];
+  const services = [];
   try {
     testHooks.bridge = fakeBridge('old', seen);
-    const first = register();
-    await first.start();
+    registration(plugin, join(dir, 'state.sqlite'), 3_600_000, services);
+    await services[0].start();
     const before = testHooks.runtime;
     assert.ok(before);
 
     testHooks.bridge = fakeBridge('new', seen);
-    const second = register();
+    registration(plugin, join(dir, 'state.sqlite'), 3_600_000, services);
     seen.length = 0;
-    await second.start();
-    await first.stop();
+    await services[1].start();
+    await services[0].stop();
     await new Promise((resolve) => setTimeout(resolve, 50));
     // The new service's first scan goes through the new companion only.
     assert.deepEqual(seen, ['old:stop', 'new:conversations.list']);
     assert.ok(before.stopped);
     assert.notEqual(testHooks.runtime, before);
-    await second.stop();
+    await services[1].stop();
   } finally {
     testHooks.bridge = null;
     testHooks.runtime = null;
@@ -1216,15 +925,13 @@ test('a reload gives the shared board a fresh companion and runtime from the new
   }
 });
 
-test('health shows a scan that cannot see the holder sessions, and clears once it can', async () => {
+test('health shows a scan that cannot see the task sessions, and clears once it can', async () => {
   const h = await harness();
   await project(h);
-  await h.userMessage('main', JARVIS_GROUP, 'telegram:-200');
-  await h.call('main', JARVIS_GROUP, { operation: 'add_task', title: 'Pricing page' });
-  h.endTurn('main', JARVIS_GROUP);
+  await addTask(h, 'Pricing page');
   h.native.fail.add('sessions.list');
   await h.tick();
-  assert.match(h.runtime.healthReport().lastError, /Cannot see engineering sessions/);
+  assert.match(h.runtime.healthReport().lastError, /Cannot see the task sessions/);
   h.native.fail.delete('sessions.list');
   await h.tick();
   assert.equal(h.runtime.healthReport().lastError, null);
@@ -1232,45 +939,19 @@ test('health shows a scan that cannot see the holder sessions, and clears once i
 
 test('a companion that has not answered for five minutes is replaced by a fresh board', async () => {
   const { default: plugin, testHooks } = await import('../src/index.ts');
-  const dir = mkdtempSync(join(tmpdir(), 'jg-recover-'));
+  const dir = mkdtempSync(join(tmpdir(), 'crew-recover-'));
   const seen = [];
-  const fakeBridge = (name) => ({
-    stopped: false,
-    failingSince: null,
-    request: async (method) => {
-      seen.push(`${name}:${method}`);
-      return { sessions: [], conversations: [] };
-    },
-    stop() {
-      this.stopped = true;
-      seen.push(`${name}:stop`);
-    },
-  });
-  let service;
+  const services = [];
   let clock = Date.now();
   try {
-    const stuck = fakeBridge('stuck');
+    const stuck = fakeBridge('stuck', seen);
     testHooks.bridge = stuck;
     testHooks.now = () => clock;
-    plugin.register({
-      pluginConfig: {
-        statePath: join(dir, 'state.sqlite'),
-        productAgentId: 'main',
-        engineeringAgentId: 'gilfoyle',
-        ownerChat: { channel: 'telegram', accountId: 'default', to: 'telegram:100' },
-        scanMs: 20,
-      },
-      config: {},
-      logger: { warn() {} },
-      registerTool() {},
-      registerGatewayMethod() {},
-      registerService: (s) => (service = s),
-      on() {},
-    });
-    await service.start();
+    registration(plugin, join(dir, 'state.sqlite'), 20, services);
+    await services[0].start();
     const before = testHooks.runtime;
     stuck.failingSince = clock;
-    testHooks.bridge = fakeBridge('fresh');
+    testHooks.bridge = fakeBridge('fresh', seen);
     clock += 4 * MINUTE;
     await new Promise((resolve) => setTimeout(resolve, 60));
     assert.ok(!seen.includes('stuck:stop'));
@@ -1280,7 +961,7 @@ test('a companion that has not answered for five minutes is replaced by a fresh 
     assert.ok(seen.includes('fresh:conversations.list'));
     assert.ok(before.stopped);
     assert.notEqual(testHooks.runtime, before);
-    await service.stop();
+    await services[0].stop();
   } finally {
     testHooks.bridge = null;
     testHooks.runtime = null;

@@ -1,21 +1,20 @@
 {
-  "id": "jarvis-gilfoyle",
-  "name": "Jarvis-Gilfoyle Project Board",
-  "description": "A small project board in SQLite: projects, tasks with whose turn it is, notes, timed wake-ups for the product and engineering managers, and guaranteed messages to the project chat.",
+  "id": "crew",
+  "name": "Crew Project Board",
+  "description": "A small project board in SQLite for a lead agent and its workers: projects, tasks with their status and notes, timed wake-ups in private task sessions, and guaranteed messages to the project chat.",
   "contracts": { "tools": ["project_board"] },
   "skills": ["./skills"],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["statePath", "productAgentId", "engineeringAgentId", "ownerChat", "worker"],
+    "required": ["statePath", "leadAgentId", "ownerChat", "worker"],
     "properties": {
       "statePath": { "type": "string" },
-      "productAgentId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
-      "engineeringAgentId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+      "leadAgentId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
       "sessionNamespace": {
         "type": "string",
         "pattern": "^[a-z][a-z0-9_-]{0,31}$",
-        "default": "jarvis-gilfoyle"
+        "default": "crew"
       },
       "enabled": { "type": "boolean" },
       "scanMs": { "type": "integer", "minimum": 10000, "maximum": 600000, "default": 60000 },
@@ -26,23 +25,23 @@
         "default": 1800,
         "description": "Timeout for one private task-session turn started by the board."
       },
-      "maxWakesPerRole": {
+      "maxTaskSessions": {
         "type": "integer",
         "minimum": 1,
         "maximum": 10,
         "default": 2,
-        "description": "At most this many private task sessions per manager run at once."
+        "description": "At most this many private task sessions run at once."
       },
       "rewriteModel": {
         "type": "string",
         "minLength": 1,
-        "description": "Model (provider/model) that rewrites project chat messages for the conversation. Omitted means the product manager's own model. Needs the entry's subagent.allowModelOverride."
+        "description": "Model (provider/model) that rewrites project chat messages for the conversation. Omitted means the lead's own model. Needs the entry's subagent.allowModelOverride."
       },
       "ownerChat": {
         "type": "object",
         "additionalProperties": false,
         "required": ["channel", "accountId", "to"],
-        "description": "The owner's direct chat with the product manager: fallback for project messages.",
+        "description": "The owner's direct chat with the lead: fallback for project messages.",
         "properties": {
           "channel": { "type": "string", "minLength": 1, "maxLength": 60 },
           "accountId": { "type": "string", "minLength": 1, "maxLength": 100 },

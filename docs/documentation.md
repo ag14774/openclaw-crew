@@ -1,8 +1,8 @@
 # Build and preview the documentation
 
-This site uses standard [Zensical](https://zensical.org/docs/) **0.0.68** with `zensical.toml`, the bundled modern theme, native search and Markdown. There are no custom templates, JavaScript, analytics or remote fonts. The existing pixel logo is used unchanged.
+This site uses standard [Zensical](https://zensical.org/docs/) **0.0.68** with `zensical.toml`, the bundled modern theme, native search and Markdown. There are no custom templates, JavaScript, analytics or remote fonts. The logo is `docs/assets/logo.png`.
 
-The header links to the repository beside search. The native version selector switches between **main** and release documentation, starting with **v2026.10.6**. Earlier releases are not archived. Main lives under `main/`; the site's root and existing page URLs redirect to main.
+The header links to the repository beside search. The native version selector switches between **main** and release documentation, starting with **v2026.10.13**. Main lives under `main/`; the site's root and page URLs redirect to main.
 
 ## Reproducible environment
 
@@ -27,13 +27,13 @@ To upgrade dependencies deliberately, change the pin, regenerate with `uv lock`,
 
 ## CI and publishing
 
-`scripts/build-docs.py` strictly builds the working checkout as main and every known release tag from v2026.10.6 onward. Each release uses its own tagged `docs/` and `zensical.toml`, with only the canonical base URL, output location, repository header and native mike selector overlaid. The locked build environment is shared. The artifact contains version directories, mike's `versions.json` with source commit IDs, and static redirects for current pages. No publishing branch is needed.
+`scripts/build-docs.py` strictly builds the working checkout as main and every known release tag from v2026.10.13 onward. Each release uses its own tagged `docs/` and `zensical.toml`, with only the canonical base URL, output location, repository header and native mike selector overlaid. The locked build environment is shared. The artifact contains version directories, mike's `versions.json` with source commit IDs, and static redirects for current pages. No publishing branch is needed.
 
 `docs-check.yml` validates that same artifact on pull requests with read-only repository permissions. It does not deploy or publish previews.
 
 `docs-pages.yml` runs on pushes to **main** and after a successful Release workflow. Every run checks out latest main with all tags, builds the complete artifact and uploads it to Pages. Its build job has only repository read permission; a separate `github-pages` deployment job has `pages: write` and `id-token: write`. This docs workflow does not release or deploy the plugin. Zensical build caching is not used in CI.
 
-The configured canonical URL is **`https://ageorgiou.com/openclaw-jarvis-gilfoyle/`**. Pages publishes from GitHub Actions. A successful local or PR build does not establish that hosting is configured or live.
+The configured canonical URL is **`https://ageorgiou.com/openclaw-crew/`**. Pages publishes from GitHub Actions. A successful local or PR build does not establish that hosting is configured or live.
 
 ## Official guidance
 

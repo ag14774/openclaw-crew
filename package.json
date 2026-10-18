@@ -1,7 +1,7 @@
 {
-  "name": "openclaw-jarvis-gilfoyle",
-  "version": "2026.10.12",
-  "description": "A small SQLite project board for a product and an engineering manager agent on OpenClaw",
+  "name": "openclaw-crew",
+  "version": "2026.10.13",
+  "description": "A small SQLite project board for a lead agent and its workers on OpenClaw",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -29,7 +29,7 @@
     "test": "npm run test:behavior",
     "test:behavior": "node --import tsx --test test/*.test.ts",
     "test:recovery": "node --import tsx --test test/recovery.test.ts",
-    "test:native": "JG_NATIVE_TEST=1 node --import tsx --test test/*.test.ts",
+    "test:native": "CREW_NATIVE_TEST=1 node --import tsx --test test/*.test.ts",
     "pack:check": "npm pack --dry-run --ignore-scripts",
     "prepack": "npm run check && npm test"
   },
@@ -37,15 +37,16 @@
     "openclaw",
     "plugin",
     "project-management",
-    "agent-orchestration"
+    "agent-orchestration",
+    "workers"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ag14774/openclaw-jarvis-gilfoyle.git"
+    "url": "git+https://github.com/ag14774/openclaw-crew.git"
   },
-  "homepage": "https://github.com/ag14774/openclaw-jarvis-gilfoyle#readme",
+  "homepage": "https://github.com/ag14774/openclaw-crew#readme",
   "bugs": {
-    "url": "https://github.com/ag14774/openclaw-jarvis-gilfoyle/issues"
+    "url": "https://github.com/ag14774/openclaw-crew/issues"
   },
   "engines": {
     "node": ">=24.16.0 <25 || >=26.1.0"
