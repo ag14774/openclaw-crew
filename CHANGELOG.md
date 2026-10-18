@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026.10.12 - 2026-10-18
+
+- The coordination skill (protocol 11.21) has managers wait for CI and similar events with a background command that exits when the state changes, whose exit wakes the session. The native condition watcher it recommended before needs the `automations` tool, which OpenClaw withholds from turns started by a worker's completion.
+- Setup now recommends making the code-review skill available to workers (a link to the installed copy follows upgrades); the workflow page describes the owner, review and fix workers.
+
 ## 2026.10.11 - 2026-10-18
 
 - The coordination skill (protocol 11.20) has review workers load the `code-review` skill themselves instead of the manager copying it into each brief, gives the fix worker any review comments already on the PR, and has the review and fix workers use the change's own worktree one at a time instead of a separate one.
