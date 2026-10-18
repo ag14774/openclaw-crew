@@ -8,23 +8,23 @@
 
 `test/board.test.ts` covers, one behavior per test:
 
-- the request round trip, from user to engineering and back to the user;
-- a question to the user and the answer back to engineering;
+- a request worked in its task session, from the user's message to the result they hear;
+- a question to the user, and their answer noted in the chat waking the task;
 - when a message is required, and that the project chat is not told twice;
-- handovers only by the holder and from the latest notes;
-- roles, project isolation and closed tasks;
+- status changes needing a note and being decided on the latest notes;
+- project isolation of task sessions, and closed tasks changing only by reopening;
 - stall reporting and check-ins;
 - workers: profiles, the limit, cancellation and the done guard;
 - the task plan: shown on the card, kept by other updates, replaced and cleared;
 - pause and resume;
-- per-role concurrency;
+- the limit on task sessions running at once;
 - delivery fallback and retry identity;
 - rewriting a project chat message for its conversation: what the model call receives, the long-chat trim, waiting within the turn for a busy or changing chat, sending as written when the rewrite fails, and no rewrite for the scan's own deliveries;
 - `use_this_chat` turn binding;
-- non-interference with personal work and other agents;
+- non-interference with the lead's personal work and other agents;
 - the board file surviving a restart, and refusal of a database with another schema;
 - one shared board when OpenClaw registers the plugin more than once in a process;
-- private task sessions following the project chat's model choice, the chat's session refreshed only from that chat, and the companion's limits on `sessions.patch` (one setting per call, the model never with admin scope);
+- task sessions following the project chat's model choice, the chat's session refreshed only from that chat, and the companion's limits on `sessions.patch` (one setting per call, the model never with admin scope);
 - closed task sessions recreated by late native turns being removed again.
 
 The fakes follow OpenClaw 2026.10.4 as found in its distribution:
@@ -42,7 +42,7 @@ These are mocked behavior tests, not live worker or hard-limit evidence.
 
 ## Native Integration
 
-`npm run test:native` (`JG_NATIVE_TEST=1`) also checks that every native method the companion calls, the transcript writer and the tool-free model call used for chat rewrites exist in the pinned OpenClaw build. It reads the installed package only.
+`npm run test:native` (`CREW_NATIVE_TEST=1`) also checks that every native method the companion calls, the transcript writer and the tool-free model call used for chat rewrites exist in the pinned OpenClaw build. It reads the installed package only.
 
 Not covered by automated tests: live model behavior (including the quality of chat rewrites), code-mode tool dispatch through the hooks, real channel delivery, and session cleanup against a real gateway. These need a live, explicitly authorized run.
 
@@ -66,7 +66,7 @@ launch a worker or read real board/session data.
 `scripts/board-backup.mjs` is the only operator script included in the package.
 `backup` and `stage` create a new private directory with a database and report;
 `verify` opens the explicitly supplied file read-only. See
-[recovery](https://ageorgiou.com/openclaw-jarvis-gilfoyle/recovery/) for prerequisites, read-only WAL coordination caveats
+[recovery](https://ageorgiou.com/openclaw-crew/recovery/) for prerequisites, read-only WAL coordination caveats
 and the separately authorized boundary before any live replacement. This is local
 SQLite restore-readability evidence, not a live/off-host/full-host recovery test.
 

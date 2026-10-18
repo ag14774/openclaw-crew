@@ -102,4 +102,4 @@ immutable while staging. Protect any off-host copies separately and never commit
 boards, staged copies or reports to this repository.
 
 Disposable-fixture regressions and command side effects are in
-[testing guide](https://github.com/ag14774/openclaw-jarvis-gilfoyle/blob/main/TESTING.md#recovery-utility).
+[testing guide](https://github.com/ag14774/openclaw-crew/blob/main/TESTING.md#recovery-utility).

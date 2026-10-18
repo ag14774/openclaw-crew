@@ -16,7 +16,7 @@ import tomli_w
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BASELINE = (2026, 10, 6)
+BASELINE = (2026, 10, 13)
 
 
 def git(*args):
@@ -52,10 +52,8 @@ def build():
     base_url = presentation["site_url"].rstrip("/") + "/"
     versions = Versions()
     tags = release_tags(git("tag", "--list").splitlines())
-    if "v2026.10.6" not in tags:
-        raise RuntimeError("Fetch release tags, including the v2026.10.6 baseline")
 
-    with tempfile.TemporaryDirectory(prefix="jg-docs-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="crew-docs-") as temporary:
         for version in ["main", *tags]:
             source = Path(temporary) / version
             source.mkdir()

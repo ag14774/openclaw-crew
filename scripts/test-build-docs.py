@@ -19,16 +19,16 @@ class BuildDocsTest(unittest.TestCase):
             docs.release_tags(
                 [
                     "v2026.10.0",
-                    "v2026.10.5",
-                    "v2026.10.6",
-                    "v2026.10.7",
+                    "v2026.10.12",
+                    "v2026.10.13",
+                    "v2026.10.14",
                     "v2026.11.0",
                     "v2027.1.0",
-                    "v2026.10.7-rc1",
+                    "v2026.10.14-rc1",
                     "other",
                 ]
             ),
-            ["v2026.10.6", "v2026.10.7", "v2026.11.0", "v2027.1.0"],
+            ["v2026.10.13", "v2026.10.14", "v2026.11.0", "v2027.1.0"],
         )
 
     def test_redirect_leaves_fragment_handling_to_browser(self):

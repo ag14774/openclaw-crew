@@ -55,12 +55,12 @@ jobs:
       - name: Package
         run: |
           npm pack --ignore-scripts
-          sha256sum openclaw-jarvis-gilfoyle-*.tgz > SHA256SUMS
+          sha256sum openclaw-crew-*.tgz > SHA256SUMS
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" openclaw-jarvis-gilfoyle-*.tgz SHA256SUMS \
+          gh release create "$GITHUB_REF_NAME" openclaw-crew-*.tgz SHA256SUMS \
             --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
 
   clawhub:
