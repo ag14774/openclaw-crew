@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.10.14 - 2026-10-19
+
+No board schema change.
+
+- Worker kit: `worker-skills/` ships the skills workers build and review with: `engineering-principles`, `code-review` (moved from `skills/`), `interrogate`, `tdd`, `typescript-best-practices` and the 17 `principle-*` skills from pstack. OpenClaw does not load it; link its folders into a skill folder only the workers read (see the README's Skills section). `interrogate` uses whichever `reviewer-` subagents the worker has, and one model's view when there are none.
+- `crew-lead` protocol 1.1: it carries the project rules a lead's own `AGENTS.md` used to hold (the decisions the user keeps, taking requests in the user's words, finding a named project before calling it unknown, no claims without board or native evidence, replacing generic coding-agent routing skills) and a default checkout layout under `~/projects/<project-id>/`. Review briefs no longer copy `code-review` into the brief.
+- The injected lead context says how to read `crew-lead` into context: `skills_read` or, in Code Mode, `skills.read('crew-lead')`.
+
 ## 2026.10.13 - 2026-10-18
 
 First release of `openclaw-crew` (plugin id `crew`), board schema 1.

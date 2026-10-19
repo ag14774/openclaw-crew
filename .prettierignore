@@ -9,3 +9,8 @@ site/
 .venv/
 .cache/
 uv.lock
+# Vendored from pstack; kept as upstream wrote them.
+worker-skills/principle-*/
+worker-skills/tdd/
+worker-skills/typescript-best-practices/
+worker-skills/interrogate/

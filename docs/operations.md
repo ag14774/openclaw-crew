@@ -40,6 +40,7 @@ Each release's [changelog](https://github.com/ag14774/openclaw-crew/blob/main/CH
 2. Stop the gateway (`openclaw gateway stop`). If the changelog lists a schema step, apply its exact statements to the board file.
 3. Install the new version: `openclaw plugins install clawhub:openclaw-crew@<version> --force --accept-capabilities`. With the gateway stopped, OpenClaw saves the install for its next start.
 4. Start the gateway (`openclaw gateway start`) and check [board health](#inspect-health).
+5. Re-run the worker skill loop from [installing the skills](getting-started.md#install-the-skills) to link new skills, and delete links to skills the release removed: `find ~/.config/opencode/skills -xtype l -delete`. For the `subagent` runtime, do both in the worker workspace's `skills/` folder.
 
 An older version refuses a board with a newer schema, so to go back, restore the backup and install the previous version.
 

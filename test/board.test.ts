@@ -832,6 +832,11 @@ test('the plugin stays out of personal work and other agents', async () => {
     personal.prependSystemContext,
     /^Session agent:lead:telegram:direct:999\.\nIn project work .* you are the lead.*adds to your usual role and does not replace it/,
   );
+  // It also says how to load the lead skill into context.
+  assert.match(
+    personal.prependSystemContext,
+    /load the crew-lead skill .*skills_read tool \(name crew-lead\).*`return await skills\.read\('crew-lead'\)`, so that its text comes back into your context/,
+  );
 });
 
 test('the board file persists across restarts and a database of another schema is refused', () => {
