@@ -22,11 +22,11 @@ You need what was asked and why, the diff range (base and head), the repository'
    - **Should fix:** real, but unlikely or cheap when it happens.
    - **Note:** polish, style, or a case that is only theoretical here.
 
-   Races that need unusual timing, hostile input on a trusted host and states the code cannot reach are notes, not blocking.
+   Races that need unusual timing and states the code cannot reach are notes, not blocking; so is hostile input when the code runs only on a trusted host.
 
 6. For each finding give the file and line, what is wrong, why it matters here, and the smallest fix. Removing code or a whole mechanism counts and is often the best fix. When several findings come from one mechanism, say so and suggest a simpler design rather than patches.
 7. Size: lines added and removed, and whether that is proportionate to what was asked.
-8. When the `interrogate` skill is available, use it for a second model's view and judge every finding by the rules above; otherwise do the review yourself. Start no reviewers or sub-agents beyond that.
+8. Use the `interrogate` skill for other models' views, and judge every finding by the rules above. Start no reviewers or subagents beyond the ones it starts.
 
 Report in about 400 words or fewer:
 

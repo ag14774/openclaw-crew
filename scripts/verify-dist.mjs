@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readdirSync, readFileSync } from 'node:fs';
 import plugin from '../dist/index.js';
 import { Store } from '../dist/store.js';
 
@@ -41,4 +42,24 @@ assert.deepEqual(manifest.skills, ['./skills']);
 assert.deepEqual(manifest.contracts.tools, ['project_board']);
 const skill = readFileSync(new URL('../skills/crew-lead/SKILL.md', import.meta.url), 'utf8');
 assert.match(skill, /^name: crew-lead$/m);
+const root = new URL('..', import.meta.url);
+const packed = Object.values(
+  JSON.parse(
+    execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
+      cwd: root,
+      encoding: 'utf8',
+    }),
+  ),
+)[0].files.map((file) => file.path);
+const skillFiles = (dir) =>
+  readdirSync(new URL(dir, root), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `${dir}/${entry.name}/SKILL.md`);
+assert.deepEqual(skillFiles('skills'), ['skills/crew-lead/SKILL.md']);
+for (const file of [
+  ...skillFiles('skills'),
+  ...skillFiles('worker-skills'),
+  'worker-skills/LICENSE-pstack',
+])
+  assert(packed.includes(file), `${file} is not packed`);
 console.log('Compiled distribution verified');

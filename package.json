@@ -12,6 +12,7 @@
     "dist/",
     "src/",
     "skills/",
+    "worker-skills/",
     "scripts/board-backup.mjs",
     "openclaw.plugin.json",
     "README.md",
@@ -30,7 +31,7 @@
     "test:behavior": "node --import tsx --test test/*.test.ts",
     "test:recovery": "node --import tsx --test test/recovery.test.ts",
     "test:native": "CREW_NATIVE_TEST=1 node --import tsx --test test/*.test.ts",
-    "pack:check": "npm pack --dry-run --ignore-scripts",
+    "pack:check": "npm pack --dry-run --ignore-scripts && node scripts/verify-dist.mjs",
     "prepack": "npm run check && npm test"
   },
   "keywords": [
