@@ -1,6 +1,6 @@
 {
   "name": "openclaw-crew",
-  "version": "2026.10.13",
+  "version": "2026.10.14",
   "description": "A small SQLite project board for a lead agent and its workers on OpenClaw",
   "license": "MIT",
   "type": "module",

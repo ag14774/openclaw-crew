@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <a href="https://ageorgiou.com/openclaw-crew/">Documentation</a> · <a href="#quick-setup">Setup</a> · <a href="#everyday-workflow">Usage</a> · <a href="#safety-and-limitations">Safety</a> · <a href="https://ageorgiou.com/openclaw-crew/board-reference/">Board reference</a> · <a href="#development">Development</a> · <a href="CHANGELOG.md">Changelog</a>
+  <a href="https://ageorgiou.com/openclaw-crew/">Documentation</a> · <a href="#quick-setup">Setup</a> · <a href="#skills">Skills</a> · <a href="#everyday-workflow">Usage</a> · <a href="#safety-and-limitations">Safety</a> · <a href="https://ageorgiou.com/openclaw-crew/board-reference/">Board reference</a> · <a href="#development">Development</a> · <a href="CHANGELOG.md">Changelog</a>
 </p>
 
 A small, personal-use OpenClaw plugin for one lead agent and its workers. The lead talks with you in the project chat and gets the work done through coding workers. A SQLite board keeps projects, tasks, notes and messages to you; each task has a private session where the lead works on it and launches workers.
@@ -68,7 +68,7 @@ Add a `crew` entry to your OpenClaw configuration. Replace the database path, ag
 
 </details>
 
-- **Permissions:** grant `project_board` to the lead. The bundled skills, [crew lead](skills/crew-lead/SKILL.md) and [code review](skills/code-review/SKILL.md), load for OpenClaw agents with the plugin; add them to any per-agent skill allowlist. Also make the code-review skill available to workers, which review and fix each change with it: link the installed copy into a skill folder the worker loads, for example `ln -s ~/.openclaw/extensions/crew/skills/code-review ~/.agents/skills/code-review`, which follows plugin upgrades, or install it with `npx skills add ag14774/openclaw-crew --skill code-review -g`. Without it, the lead copies the review rules into every review brief. Enable both hook permissions shown above: `allowConversationAccess` and `allowPromptInjection`.
+- **Permissions:** grant `project_board` to the lead and enable both hook permissions shown above: `allowConversationAccess` and `allowPromptInjection`. Install the [skills](#skills) for the lead and the workers.
 - **Workers:** configure the worker's ACP runtime in OpenClaw for `runtime: "acp"`; `"subagent"` is also supported.
 - **Storage:** use a dedicated new SQLite file or an existing **schema 1** board at the absolute `statePath`. Never use an unrelated database.
 
@@ -79,6 +79,39 @@ openclaw gateway restart
 ```
 
 To upgrade, follow [upgrading](https://ageorgiou.com/openclaw-crew/operations/#upgrade): back up the board, apply any schema step the [changelog](CHANGELOG.md) lists, then install the new version. See the [configuration reference](https://ageorgiou.com/openclaw-crew/board-reference/#configuration) for optional settings and [plugin schema](openclaw.plugin.json) for the authoritative shape.
+
+## Skills
+
+The lead needs no change to its `AGENTS.md`: the plugin tells it to load the bundled [crew-lead](skills/crew-lead/SKILL.md) skill. Add `crew-lead` to any per-agent skill allowlist.
+
+Workers need the [worker kit](worker-skills/README.md), which OpenClaw does not load: `engineering-principles`, which they load first, `code-review`, `interrogate` and the skills these point to. Link each of its folders into a skill folder only the workers read. For OpenCode workers that is `~/.config/opencode/skills`:
+
+```bash
+mkdir -p ~/.config/opencode/skills && for s in ~/.openclaw/extensions/crew/worker-skills/*/; do ln -sfn "${s%/}" ~/.config/opencode/skills/; done
+```
+
+Do not use `~/.agents/skills`: OpenClaw shows that folder to every agent, the lead included. Re-run the loop after each upgrade, and delete links to skills a release removed with `find ~/.config/opencode/skills -xtype l -delete`. With the `subagent` runtime, link the folders into the `skills/` folder of the worker agent's workspace instead.
+
+`interrogate` gets other models' views of a change from read-only reviewer subagents, one per model; without them, reviews use one model. In OpenCode, define subagents whose names start with `reviewer-`, for example in `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "agent": {
+    "reviewer-a": {
+      "description": "Read-only code reviewer",
+      "mode": "subagent",
+      "model": "provider/model-a",
+      "permission": { "edit": "deny" }
+    },
+    "reviewer-b": {
+      "description": "Read-only code reviewer",
+      "mode": "subagent",
+      "model": "provider/model-b",
+      "permission": { "edit": "deny" }
+    }
+  }
+}
+```
 
 ## Everyday workflow
 

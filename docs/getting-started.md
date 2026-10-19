@@ -63,9 +63,42 @@ Add this entry to your OpenClaw configuration. All paths, agent IDs, chat destin
 
 Use a dedicated **new database file** or an existing **schema 1 board** at the absolute `statePath`. The store's schema-version check does not prove a database belongs to this plugin: never use an unrelated database. `:memory:` is ephemeral and unsuitable for durable work.
 
-Grant `project_board` to the lead in its OpenClaw tool permissions. The bundled skills, [crew-lead](https://github.com/ag14774/openclaw-crew/blob/main/skills/crew-lead/SKILL.md) and [code-review](https://github.com/ag14774/openclaw-crew/blob/main/skills/code-review/SKILL.md), load for OpenClaw agents with the plugin; add them to any per-agent skill allowlist. Also make the code-review skill available to workers, which review and fix each change with it: link the installed copy into a skill folder the worker loads, for example `ln -s ~/.openclaw/extensions/crew/skills/code-review ~/.agents/skills/code-review`, which follows plugin upgrades, or install it with `npx skills add ag14774/openclaw-crew --skill code-review -g`. Without it, the lead copies the review rules into every review brief. Configure the worker's ACP runtime in OpenClaw when using `acp`; `subagent` is also supported. The plugin does not configure the agents, providers or channel for you.
+Grant `project_board` to the lead in its OpenClaw tool permissions and [install the skills](#install-the-skills). Configure the worker's ACP runtime in OpenClaw when using `acp`; `subagent` is also supported. The plugin does not configure the agents, providers or channel for you.
 
 The entry's `enabled` and hook permissions are host settings. The separate `config.enabled: false` stops automatic scans and wakes but leaves the board tool available. Optional cadence, turn timeout and concurrency settings are in the [configuration reference](board-reference.md#configuration); the authoritative schema is [openclaw.plugin.json](https://github.com/ag14774/openclaw-crew/blob/main/openclaw.plugin.json).
+
+## Install the skills
+
+The lead needs no change to its `AGENTS.md`: the plugin tells it to load the bundled [crew-lead](https://github.com/ag14774/openclaw-crew/blob/main/skills/crew-lead/SKILL.md) skill. Add `crew-lead` to any per-agent skill allowlist.
+
+Workers need the [worker kit](https://github.com/ag14774/openclaw-crew/blob/main/worker-skills/README.md) in the installed plugin's `worker-skills` folder, which OpenClaw does not load: `engineering-principles`, which they load first, `code-review`, `interrogate` and the skills these point to. Link each of its folders into a skill folder only the workers read. For OpenCode workers that is `~/.config/opencode/skills`:
+
+```bash
+mkdir -p ~/.config/opencode/skills && for s in ~/.openclaw/extensions/crew/worker-skills/*/; do ln -sfn "${s%/}" ~/.config/opencode/skills/; done
+```
+
+Do not use `~/.agents/skills`: OpenClaw shows that folder to every agent, the lead included. Re-run the loop after each [upgrade](operations.md#upgrade). With the `subagent` runtime, link the folders into the `skills/` folder of the worker agent's workspace instead.
+
+`interrogate` gets other models' views of a change from read-only reviewer subagents, one per model; without them, reviews use one model. In OpenCode, define subagents whose names start with `reviewer-`, for example in `~/.config/opencode/opencode.json`:
+
+```json
+{
+  "agent": {
+    "reviewer-a": {
+      "description": "Read-only code reviewer",
+      "mode": "subagent",
+      "model": "provider/model-a",
+      "permission": { "edit": "deny" }
+    },
+    "reviewer-b": {
+      "description": "Read-only code reviewer",
+      "mode": "subagent",
+      "model": "provider/model-b",
+      "permission": { "edit": "deny" }
+    }
+  }
+}
+```
 
 ## Load and check
 
