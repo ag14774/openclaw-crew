@@ -81,7 +81,7 @@ const parameters = {
     plan: {
       type: 'string',
       description:
-        'update_task: the task’s working plan (design, steps, dependencies, progress), shown at the top of the task card. Replaces the previous plan; an empty string clears it.',
+        'update_task: the task’s working plan (design, steps, dependencies, progress), shown on the task card and to the user in the project chat as the task’s status card. Replaces the previous plan; an empty string clears it.',
     },
   },
 };

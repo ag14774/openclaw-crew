@@ -30,6 +30,8 @@ Inspect pending/failed outbox state with `list` and health, then check the nativ
 
 Keep attachment paths available and readable until delivery finishes. A failed file retries the message using stable native identities for already-sent parts. Transcript recording is separate: it waits while the chat session is active and is retried by the scan for a day. Its failure is logged without changing delivery status.
 
+A status card that stopped changing has failed ten times in a row and is left as it is; the gateway log says why each attempt failed.
+
 Do not equate a queued message, a model's summary or a transcript entry with the user having read it.
 
 ## Upgrade
@@ -37,7 +39,7 @@ Do not equate a queued message, a model's summary or a transcript entry with the
 Each release's [changelog](https://github.com/ag14774/openclaw-crew/blob/main/CHANGELOG.md) entry says whether it changes the board schema. To upgrade:
 
 1. Check that ClawHub lists the new version (`openclaw plugins search openclaw-crew`); its security review can take a while after the release. Then wait until no task session or worker is running and [back up the board](recovery.md); any version of the backup script works.
-2. Stop the gateway (`openclaw gateway stop`). If the changelog lists a schema step, apply its exact statements to the board file.
+2. Stop the gateway (`openclaw gateway stop`). If the changelog lists a schema step, apply its exact statements to the board file; a schema change the plugin applies itself happens when the gateway starts.
 3. Install the new version: `openclaw plugins install clawhub:openclaw-crew@<version> --force --accept-capabilities`. With the gateway stopped, OpenClaw saves the install for its next start.
 4. Start the gateway (`openclaw gateway start`) and check [board health](#inspect-health).
 5. Re-run the worker skill loop from [installing the skills](getting-started.md#install-the-skills) to link new skills, and delete links to skills the release removed: `find ~/.config/opencode/skills -xtype l -delete`. For the `subagent` runtime, do both in the worker workspace's `skills/` folder.

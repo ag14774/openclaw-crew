@@ -35,7 +35,7 @@ assert.deepEqual(methods, ['crew.board.call', 'crew.board.tick', 'crew.board.hea
 assert.deepEqual(services, ['crew-board']);
 assert(hooks.includes('before_tool_call') && hooks.includes('before_prompt_build'));
 const store = new Store(':memory:');
-assert.equal(store.get('PRAGMA user_version').user_version, 1);
+assert.equal(store.get('PRAGMA user_version').user_version, 2);
 store.close();
 const manifest = JSON.parse(readFileSync(new URL('../openclaw.plugin.json', import.meta.url)));
 assert.deepEqual(manifest.skills, ['./skills']);

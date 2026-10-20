@@ -22,6 +22,24 @@ test(
 );
 
 test(
+  'the message edit used for status cards exists in the pinned OpenClaw build',
+  { skip: process.env.CREW_NATIVE_TEST !== '1' && 'set CREW_NATIVE_TEST=1' },
+  () => {
+    const dist = dirname(fileURLToPath(import.meta.resolve('openclaw')));
+    const code = readdirSync(dist)
+      .filter((n) => /^(src|action-runtime)-.*\.mjs$/.test(n))
+      .map((n) => readFileSync(join(dist, n), 'utf8'))
+      .join('\n');
+    // message.action takes the board's own origin, and the bundled Telegram channel edits.
+    assert.match(
+      code,
+      /MessageActionParamsSchema = closedObject\(\{[\s\S]*?conversationReadOrigin: Type\.Optional\(Type\.Literal\("direct-operator"\)\)/,
+    );
+    assert.match(code, /\bedit: "editMessage"/);
+  },
+);
+
+test(
   'the transcript writer the board uses exists in the pinned OpenClaw build',
   { skip: process.env.CREW_NATIVE_TEST !== '1' && 'set CREW_NATIVE_TEST=1' },
   async () => {

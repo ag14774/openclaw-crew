@@ -70,7 +70,7 @@ Add a `crew` entry to your OpenClaw configuration. Replace the database path, ag
 
 - **Permissions:** grant `project_board` to the lead and enable both hook permissions shown above: `allowConversationAccess` and `allowPromptInjection`. Install the [skills](#skills) for the lead and the workers.
 - **Workers:** configure the worker's ACP runtime in OpenClaw for `runtime: "acp"`; `"subagent"` is also supported.
-- **Storage:** use a dedicated new SQLite file or an existing **schema 1** board at the absolute `statePath`. Never use an unrelated database.
+- **Storage:** use a dedicated new SQLite file or an existing board at the absolute `statePath`; a **schema 1** board is upgraded to schema 2 when the plugin opens it. Never use an unrelated database.
 
 Restart the Gateway to load the plugin:
 
@@ -116,7 +116,7 @@ Do not use `~/.agents/skills`: OpenClaw shows that folder to every agent, the le
 ## Everyday workflow
 
 1. **Start in the project chat.** Ask the lead to create a project and record its context; messages are bound to that chat.
-2. **Request work.** The lead adds a task and works on it in the task's private session: it settles a design, has a worker build the change, another review it, and merges once CI passes.
+2. **Request work.** The lead adds a task and works on it in the task's private session: it settles a design, has a worker build the change, another review it, and merges once CI passes. A status card in the project chat shows the task's plan and where it stands, edited as the work moves.
 3. **Answer and review.** The lead asks you questions in the chat when it needs you, then tells you the result and closes the task.
 
 By default, the board scans every **60 seconds** for changed tasks or due check-ins (normally **60 minutes**). It wakes the lead in the task's session without interrupting an active turn; tasks waiting on you get no automatic wakes. Use `/model` and `/think` in the project chat to choose settings for the task sessions; otherwise agent defaults apply.

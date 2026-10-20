@@ -16,6 +16,7 @@
 - stall reporting and check-ins;
 - workers: profiles, the limit, cancellation and the done guard;
 - the task plan: shown on the card, kept by other updates, replaced and cleared;
+- status cards: posted once a plan exists, edited only when their text changes and a last time on close, none for a project without its own chat, a lost post retried without a second post, and a card whose message is gone given up after ten tries;
 - the project context in the system prompt of its task sessions and its chat, unchanged across turns, and context over 40,000 characters refused rather than cut;
 - pause and resume;
 - the limit on task sessions running at once;
@@ -23,7 +24,7 @@
 - rewriting a project chat message for its conversation: what the model call receives, the long-chat trim, waiting within the turn for a busy or changing chat, sending as written when the rewrite fails, and no rewrite for the scan's own deliveries;
 - `use_this_chat` turn binding;
 - non-interference with the lead's personal work and other agents;
-- the board file surviving a restart, and refusal of a database with another schema;
+- the board file surviving a restart, a schema 1 board opened as schema 2 with its tasks intact, and refusal of a database with another schema;
 - one shared board when OpenClaw registers the plugin more than once in a process;
 - task sessions following the project chat's model choice, the chat's session refreshed only from that chat, and the companion's limits on `sessions.patch` (one setting per call, the model never with admin scope);
 - closed task sessions recreated by late native turns being removed again.
@@ -33,7 +34,7 @@ The fakes follow OpenClaw 2026.10.4 as found in its distribution:
 - `hasActiveRun` is the live-turn signal;
 - `sessions_spawn` results carry `details.childSessionKey`;
 - `conversations.send` receipts are `sent`, `queued`, `suppressed` or `unknown`, and `queued` means durably queued;
-- a repeated `operationId` does not send twice.
+- a repeated `operationId` does not send twice, and a repeated `message.action` idempotency key replays the first result (OpenClaw keeps those for five minutes).
 
 `test/admission.test.ts` drives the real `before_tool_call` and `after_tool_call` hooks with fake native sessions: simultaneous launches at the last free slot, parallel launches in one turn while there is room, refused and failed launches not holding a slot, a launch whose completion never arrives counting for 16 minutes, which running workers count, a worker target written in another case, and waiting out a full limit with ordinary check-ins.
 
@@ -43,7 +44,7 @@ These are mocked behavior tests, not live worker or hard-limit evidence.
 
 ## Native Integration
 
-`npm run test:native` (`CREW_NATIVE_TEST=1`) also checks that every native method the companion calls, the transcript writer and the tool-free model call used for chat rewrites exist in the pinned OpenClaw build. It reads the installed package only.
+`npm run test:native` (`CREW_NATIVE_TEST=1`) also checks that every native method the companion calls, the message edit used for status cards (`message.action` with the board's own origin, and the bundled Telegram channel's `edit`), the transcript writer and the tool-free model call used for chat rewrites exist in the pinned OpenClaw build. It reads the installed package only; the Discord channel is a separate package, so its `edit` is not checked there.
 
 Not covered by automated tests: live model behavior (including the quality of chat rewrites), code-mode tool dispatch through the hooks, real channel delivery, and session cleanup against a real gateway. These need a live, explicitly authorized run.
 

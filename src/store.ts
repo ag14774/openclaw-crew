@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 // The board: projects, tasks, their notes, and the notification outbox. An open task is the
 // lead's turn; a waiting one waits on the user.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS projects(
@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS tasks(
   idle_wakes INTEGER NOT NULL DEFAULT 0,
   stalled INTEGER,
   cleaned INTEGER,
+  card TEXT,
   created INTEGER NOT NULL,
   updated INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS tasks_open ON tasks(status, project);
@@ -64,6 +65,7 @@ export class Store {
       const version = this.get('PRAGMA user_version').user_version;
       assert(
         version === SCHEMA_VERSION ||
+          version === 1 ||
           (version === 0 && !this.get('SELECT 1 FROM sqlite_schema LIMIT 1')),
         `statePath is not a project board (schema ${version}, expected ${SCHEMA_VERSION}); point it at a new or existing board file`,
       );
@@ -72,8 +74,12 @@ export class Store {
       this.db.exec(
         'PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;',
       );
-      this.db.exec(SCHEMA);
-      this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+      this.tx(() => {
+        this.db.exec(SCHEMA);
+        // Schema 2 added the tasks' status cards.
+        if (version === 1) this.db.exec('ALTER TABLE tasks ADD COLUMN card TEXT');
+        this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
+      });
     } catch (error) {
       this.db.close();
       throw error;
