@@ -415,19 +415,50 @@ test('the plan is kept on the task, shown on its card, and replaced or cleared a
   assert.equal((await h.call(LEAD_DM, { operation: 'show', task })).task.plan, undefined);
 });
 
-test('the card shows the project context and the description in full', async () => {
+test('the project context is in the system prompt of its task sessions and its chat', async () => {
   const h = await harness();
   await project(h);
-  const long = (end) => `${'x'.repeat(7980)} ${end}`;
-  await h.call(LEAD_DM, {
-    operation: 'update_project',
-    project: 'quote-desk',
-    context: long('CONTEXT-END'),
-  });
-  const { task } = await addTask(h, 'Long', { body: long('BODY-END') });
-  const card = await h.hooks.before_prompt_build({}, { agentId: 'lead', sessionKey: key(h, task) });
-  assert.match(card.prependContext, /CONTEXT-END/);
-  assert.match(card.prependContext, /BODY-END/);
+  const context = `Repository ~/projects/quote-desk.\n${'x'.repeat(39000)} CONTEXT-END`;
+  await h.call(LEAD_DM, { operation: 'update_project', project: 'quote-desk', context });
+  const { task } = await addTask(h, 'Long', { body: `${'y'.repeat(7980)} BODY-END` });
+  const block = `Project context for "Quote Desk" (project quote-desk), kept on project_board:\n${context}`;
+
+  // In the task session it is in the system prompt, not the turn's message, and stays the
+  // same from turn to turn while the task changes.
+  const turn = () => h.hooks.before_prompt_build({}, { agentId: 'lead', sessionKey: key(h, task) });
+  const first = await turn();
+  assert.equal(first.appendSystemContext, block);
+  assert.doesNotMatch(first.prependContext, /CONTEXT-END|Repository/);
+  assert.match(first.prependContext, /BODY-END/);
+  await h.call(key(h, task), { operation: 'update_task', note: 'Started' });
+  const second = await turn();
+  assert.equal(second.appendSystemContext, first.appendSystemContext);
+  assert.match(second.prependContext, /Started/);
+
+  // The project chat sees it too, in turns with or without a user message; other chats do not.
+  assert.equal((await h.userMessage(LEAD_GROUP, 'telegram:-200')).appendSystemContext, block);
+  h.endTurn(LEAD_GROUP);
+  const chat = await h.hooks.before_prompt_build({}, { agentId: 'lead', sessionKey: LEAD_GROUP });
+  assert.equal(chat.appendSystemContext, block);
+  assert.equal((await h.userMessage(LEAD_DM, 'telegram:100')).appendSystemContext, undefined);
+});
+
+test('project context over 40,000 characters is refused, not cut', async () => {
+  const h = await harness();
+  const fits = 'x'.repeat(40000);
+  await h.userMessage(LEAD_GROUP, 'telegram:-200');
+  const create = (context) =>
+    h.call(LEAD_GROUP, { operation: 'create_project', name: 'Quote Desk', context });
+  assert.match((await create(`${fits}y`)).error, /at most 40000 characters; condense it/);
+  assert.equal((await h.call(LEAD_DM, { operation: 'list' })).projects.length, 0);
+  assert.equal((await create(fits)).project, 'quote-desk');
+  const update = (context) =>
+    h.call(LEAD_DM, { operation: 'update_project', project: 'quote-desk', context });
+  assert.match((await update(`${fits}z`)).error, /at most 40000 characters; condense it/);
+  const shown = (await h.call(LEAD_DM, { operation: 'show', project: 'quote-desk' })).project;
+  assert.equal(shown.context, fits);
+  assert(!(await update(`${'z'.repeat(39999)}!`)).error);
+  assert.equal(h.runtime.store.project('quote-desk').context, `${'z'.repeat(39999)}!`);
 });
 
 test('cancelling stops the task’s workers', async () => {

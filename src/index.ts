@@ -36,7 +36,7 @@ const parameters = {
     context: {
       type: 'string',
       description:
-        'create_project/update_project: durable project facts (repositories, conventions).',
+        'create_project/update_project: the project’s current state for you, up to 40,000 characters, shown in its chat and task sessions. Replaces the previous context.',
     },
     state: {
       type: 'string',
@@ -86,7 +86,7 @@ const parameters = {
   },
 };
 
-const OUTPUT_LIMIT = 16 * 1024;
+const OUTPUT_LIMIT = 64 * 1024;
 const bound = (value) => {
   const encoded = JSON.stringify(value ?? null);
   return Buffer.byteLength(encoded) <= OUTPUT_LIMIT
@@ -365,14 +365,25 @@ export default {
       } catch {
         return { prependSystemContext: system };
       }
+      // Project context goes after OpenClaw's system prompt, so the prompt before it stays
+      // a stable cached prefix. What prependContext adds is stored with each turn's message.
+      const context = () => {
+        const text = r.projectContext(ctx.sessionKey);
+        return text ? { appendSystemContext: text } : {};
+      };
       if (isPrivateSession(ctx.sessionKey))
         return {
           prependSystemContext: `${system}\n${PRIVATE_GUIDANCE}`,
           prependContext: r.taskCard(ctx.sessionKey),
+          ...context(),
         };
       await r.beginTurn(ctx.sessionKey);
       const chat = r.chatContext(ctx.sessionKey);
-      return { prependSystemContext: system, ...(chat ? { prependContext: chat } : {}) };
+      return {
+        prependSystemContext: system,
+        ...context(),
+        ...(chat ? { prependContext: chat } : {}),
+      };
     });
     on('before_agent_run', (_event, ctx) => {
       if (!isPrivateSession(ctx?.sessionKey) || get().allowRun(ctx.sessionKey)) return;

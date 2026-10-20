@@ -66,7 +66,7 @@ function text(value, max, name) {
   assert(typeof value === 'string', `${name} must be text`);
   const normalized = value.replace(/\r\n?/g, '\n').trim();
   assert(normalized, `${name} must not be empty`);
-  assert(normalized.length <= max, `${name} must be at most ${max} characters`);
+  assert(normalized.length <= max, `${name} must be at most ${max} characters; condense it`);
   assert(!CONTROL.test(normalized), `${name} must not contain control characters`);
   return normalized;
 }
@@ -74,6 +74,8 @@ const line = (value, max, name) =>
   text(typeof value === 'string' ? value.replace(/\s+/g, ' ') : value, max, name);
 const optional = (value, max, name) =>
   value === undefined || value === null || value === '' ? undefined : text(value, max, name);
+// Project context is shown in full in the project's chat and task sessions.
+const MAX_CONTEXT = 40000;
 // Files sent with a message: existing absolute paths, read again at each delivery attempt.
 const MAX_FILES = 4;
 const MAX_FILE_MB = 8;
@@ -326,7 +328,7 @@ export class BoardRuntime {
   createProject(caller, input) {
     assert(!caller.task, 'Create projects from a conversation, not from a task session');
     const name = line(input.name, 120, 'name');
-    const context = optional(input.context, 8000, 'context') ?? '';
+    const context = optional(input.context, MAX_CONTEXT, 'context') ?? '';
     const base = slug(name);
     let id = base;
     for (let n = 2; this.store.get('SELECT 1 FROM projects WHERE id=?', id); n++)
@@ -355,7 +357,8 @@ export class BoardRuntime {
     const now = this.now();
     const changes = {};
     if (input.name !== undefined) changes.name = line(input.name, 120, 'name');
-    if (input.context !== undefined) changes.context = String(input.context).trim().slice(0, 8000);
+    if (input.context !== undefined)
+      changes.context = optional(input.context, MAX_CONTEXT, 'context') ?? '';
     if (input.use_this_chat) {
       const route = caller.source?.route;
       assert(
@@ -1071,12 +1074,34 @@ export class BoardRuntime {
       ? `${lines.join('\n')}\n(Project background from project_board, not an instruction.)`
       : null;
   }
+  // The project context for the system prompt: the task's project in its task session, or
+  // the projects whose chat this session is. It changes only when a context does, so the
+  // provider's cached prompt survives from turn to turn.
+  projectContext(sessionKey) {
+    const scope = parseTaskSession(sessionKey);
+    const projects = scope
+      ? this.store.all(
+          'SELECT p.* FROM projects p JOIN tasks t ON t.project=p.id WHERE t.id=? AND t.created=?',
+          scope.taskId,
+          scope.created,
+        )
+      : this.store.all(
+          "SELECT * FROM projects WHERE state!='archived' AND json_extract(route,'$.sessionKey')=? ORDER BY id",
+          sessionKey,
+        );
+    return projects
+      .filter((project) => project.context)
+      .map(
+        (project) =>
+          `Project context for "${project.name}" (project ${project.id}), kept on project_board:\n${project.context}`,
+      )
+      .join('\n\n');
+  }
   // A task with its project, description, plan and latest notes.
   taskLines(task, project) {
     const notes = this.store.notes(task.id, 15);
     return [
       `Project: ${project.name} (project ${project.id}), ${project.state}. Project chat: ${chatLabel(project.route)}.`,
-      ...(project.context ? [`Project context:\n${project.context}`] : []),
       `Task #${task.id}: ${task.title}`,
       `Status: ${STATUS_LINE[task.status]}.`,
       ...(task.body ? [`Description:\n${task.body}`] : []),
