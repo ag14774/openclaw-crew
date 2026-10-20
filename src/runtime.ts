@@ -133,6 +133,8 @@ const conversation = (value) => {
 };
 // The text a chat receives: the owner DM gets the project name first.
 const sentText = (row, project, toOwner) => (toOwner ? `[${project.name}] ${row.text}` : row.text);
+const contextBlock = (project) =>
+  `Project context for "${project.name}" (project ${project.id}), kept on project_board:\n${project.context}`;
 const chatLabel = (route) =>
   route
     ? `${route.channel} ${route.kind === 'direct' ? 'DM' : 'chat'} ${route.target}`
@@ -598,11 +600,12 @@ export class BoardRuntime {
     return pending;
   }
   // Before its first send to the project chat, the lead rewrites a message for the
-  // conversation it lands in, given that chat since the task's request, the task and the
-  // message as written. The model call runs within the lead's turn that sent the message,
-  // because OpenClaw admits new work only from running work; the scan's own deliveries go
-  // out as written. While the chat is mid-reply, or changed during the rewrite, it waits and
-  // tries again, for at most ADAPT_WAIT_MS. Any failure sends the message as written.
+  // conversation it lands in, given the project context, that chat since the task's request,
+  // the task and the message as written. The model call runs within the lead's turn that
+  // sent the message, because OpenClaw admits new work only from running work; the scan's
+  // own deliveries go out as written. While the chat is mid-reply, or changed during the
+  // rewrite, it waits and tries again, for at most ADAPT_WAIT_MS. Any failure sends the
+  // message as written.
   async adaptToChat(row, project, route) {
     const waitedOut = () => this.now() - row.created >= ADAPT_WAIT_MS;
     try {
@@ -624,8 +627,9 @@ export class BoardRuntime {
           ...(task ? [this.taskLines(task, project).join('\n')] : []),
           `The message to send:\n${row.text}`,
         ].join('\n\n');
+        const system = [ADAPT_INSTRUCTIONS, ...(project.context ? [contextBlock(project)] : [])];
         const adapted = text(
-          await this.adapt({ system: ADAPT_INSTRUCTIONS, message }),
+          await this.adapt({ system: system.join('\n\n'), message }),
           4000,
           'message',
         );
@@ -1100,10 +1104,7 @@ export class BoardRuntime {
         );
     return projects
       .filter((project) => project.context)
-      .map(
-        (project) =>
-          `Project context for "${project.name}" (project ${project.id}), kept on project_board:\n${project.context}`,
-      )
+      .map(contextBlock)
       .join('\n\n');
   }
   // A task with its project, description, plan and latest notes.

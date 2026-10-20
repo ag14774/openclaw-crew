@@ -777,6 +777,8 @@ async function chatProject(h) {
 test('a project chat message is rewritten for the conversation before it is sent', async () => {
   const h = await harness();
   const { say } = await chatProject(h);
+  const context = 'Repository ~/projects/quote-desk.';
+  await h.call(LEAD_DM, { operation: 'update_project', project: 'quote-desk', context });
   say('user', 'Old chatter');
   h.advance(MINUTE);
   say('user', 'Please add CSV export');
@@ -798,9 +800,19 @@ test('a project chat message is rewritten for the conversation before it is sent
   });
   assert.equal(closed.message.state, 'sent');
   assert.equal(h.native.sent.at(-1).message, 'The CSV export you asked for is done.');
-  // The rewrite sees the chat from the request on, the task, and the message as written.
+  // The rewrite sees the project context with its instructions, then the chat from the
+  // request on, the task, and the message as written.
   const { system, message } = calls[0];
-  assert.match(system, /Keep every fact/);
+  assert.match(
+    system,
+    /^You are about to send a message in a project chat\.[\s\S]*Keep every fact/,
+  );
+  assert.ok(
+    system.endsWith(
+      `Reply with the message text only.\n\nProject context for "Quote Desk" (project quote-desk), kept on project_board:\n${context}`,
+    ),
+  );
+  assert.doesNotMatch(message, /Repository/);
   assert.doesNotMatch(message, /Old chatter/);
   assert.match(
     message,
@@ -890,9 +902,10 @@ test('the rewrite runs as the lead, with its workspace files and the configured 
     assert.equal(h.native.sent.at(-1).message, 'Rewritten');
     const [{ agentId, model, extraSystemPrompt }] = calls;
     assert.deepEqual([agentId, model], ['lead', 'openai/gpt-5.6-terra']);
+    // A project without context adds none.
     assert.match(
       extraSystemPrompt,
-      /Keep every fact[\s\S]*Calm and precise\.\n\nExplain in plain words\.$/,
+      /Keep every fact[\s\S]*Reply with the message text only\.\n\nWho you are[\s\S]*Calm and precise\.\n\nExplain in plain words\.$/,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -21,7 +21,7 @@
 - pause and resume;
 - the limit on task sessions running at once;
 - delivery fallback and retry identity;
-- rewriting a project chat message for its conversation: what the model call receives, the long-chat trim, waiting within the turn for a busy or changing chat, sending as written when the rewrite fails, and no rewrite for the scan's own deliveries;
+- rewriting a project chat message for its conversation: what the model call receives (the project context with its instructions), the long-chat trim, waiting within the turn for a busy or changing chat, sending as written when the rewrite fails, and no rewrite for the scan's own deliveries;
 - `use_this_chat` turn binding;
 - non-interference with the lead's personal work and other agents;
 - the board file surviving a restart, a schema 1 board opened as schema 2 with its tasks intact, and refusal of a database with another schema;
