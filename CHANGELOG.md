@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026.10.15 - 2026-10-20
+
+No board schema change.
+
+- Worker kit: the principle skills no longer mention pstack skills that the kit does not ship.
+
 ## 2026.10.14 - 2026-10-19
 
 No board schema change.
