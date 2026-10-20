@@ -38,6 +38,7 @@ export async function harness({ config = {}, complete = null, workspace = null }
     gone: new Set(), // message ids the chat no longer has
     actionResults: new Map(),
     lose: new Set(), // methods whose result is lost after they ran
+    down: new Set(), // methods that fail before reaching the gateway
     transcript: [],
     history: {}, // session key -> chat.history messages
     runs: [],
@@ -85,9 +86,11 @@ export async function harness({ config = {}, complete = null, workspace = null }
         case 'chat.history':
           return { messages: native.history[params.sessionKey] ?? [] };
         case 'message.action': {
-          // A repeated idempotency key replays the first result, as the gateway does.
-          if (native.actionResults.has(params.idempotencyKey))
-            return native.actionResults.get(params.idempotencyKey);
+          if (native.down.has(method)) throw new Error('Gateway companion timeout');
+          // A repeated idempotency key replays the first result for five minutes, as the
+          // gateway does.
+          const replay = native.actionResults.get(params.idempotencyKey);
+          if (replay && clock - replay.at < 5 * 60 * 1000) return replay.result;
           let result;
           if (params.action === 'edit') {
             if (native.gone.has(params.params.messageId)) throw new Error('Unknown Message');
@@ -98,7 +101,7 @@ export async function harness({ config = {}, complete = null, workspace = null }
             (params.params.buffer ? native.files : native.posts).push(params);
             result = { ok: true, result: { messageId: `m-${native.posts.length}` } };
           }
-          native.actionResults.set(params.idempotencyKey, result);
+          native.actionResults.set(params.idempotencyKey, { result, at: clock });
           if (native.lose.has(method)) throw new Error('Gateway companion timeout');
           return result;
         }

@@ -94,7 +94,7 @@ Required configuration is shown in [getting started](getting-started.md#configur
 
 The entry's `enabled` switch and hook permissions are OpenClaw settings, separate from the plugin's `config.enabled`. The lead needs `project_board` permission; its other tools and the worker runtime remain host configuration.
 
-SQLite uses WAL, full synchronous writes and foreign keys. New parent directories use mode `0700`, and the database file is set to `0600`. The store accepts an empty schema-zero database, schema 2, or schema 1, which it upgrades to 2 by adding the status-card column in one transaction; nonempty schema-zero files and other versions are refused before board DDL, chmod or journal changes. The version is not a comprehensive database-identity check, so always use a dedicated board file, never an unrelated database. See [backup and staged recovery](recovery.md) for the standalone operator utility and its separate verification boundary.
+SQLite uses WAL, full synchronous writes and foreign keys. New parent directories use mode `0700`, and the database file is set to `0600`. The store accepts an empty schema-zero database or schema 2. A schema 1 board is refused until the operator runs the statements in the 2026.10.17 CHANGELOG entry; nonempty schema-zero files and other versions are refused before board DDL, chmod or journal changes. The version is not a comprehensive database-identity check, so always use a dedicated board file, never an unrelated database. See [backup and staged recovery](recovery.md) for the standalone operator utility and its separate verification boundary.
 
 ## Operator methods
 

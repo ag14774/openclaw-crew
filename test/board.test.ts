@@ -517,6 +517,34 @@ test('a failed status card post is retried without posting twice; a card whose m
   assert.equal(h.native.posts.length, 1);
 });
 
+test('a status card post is never retried once the gateway may have forgotten it', async () => {
+  const h = await harness();
+  await project(h);
+  const { task } = await addTask(h, 'CSV export');
+  // The post reaches the chat but its result is lost, then the gateway stays out of reach.
+  h.native.lose.add('message.action');
+  await h.call(key(h, task), { operation: 'update_task', plan: '[ ] 1 Build' });
+  await h.tick();
+  h.native.lose.delete('message.action');
+  h.native.down.add('message.action');
+  const sends = () =>
+    h.native.calls.filter(([m, p]) => m === 'message.action' && p.action === 'send').length;
+  for (let i = 0; i < 4; i++) {
+    h.advance(MINUTE);
+    await h.tick();
+  }
+  const tried = sends();
+  // Past the gateway's replay window the post is given up rather than sent again.
+  h.native.down.delete('message.action');
+  for (let i = 0; i < 5; i++) {
+    h.advance(MINUTE);
+    await h.tick();
+  }
+  assert.equal(sends(), tried);
+  assert.equal(h.native.posts.length, 1);
+  assert.ok(h.warnings.some((w) => /Status card of task #\d+ is not posted/.test(w)));
+});
+
 test('the project context is in the system prompt of its task sessions and its chat', async () => {
   const h = await harness();
   await project(h);

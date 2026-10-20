@@ -38,6 +38,8 @@ const FALLBACK_ATTEMPTS = 10;
 // Status cards fit one Discord message, and give up on a message that keeps refusing edits.
 const CARD_CHARS = 2000;
 const CARD_ATTEMPTS = 10;
+// The gateway replays a repeated post for five minutes, so a post is retried only within four.
+const CARD_POST_MS = 4 * MINUTE;
 const ZERO_USAGE = {
   input: 0,
   output: 0,
@@ -1513,9 +1515,18 @@ export class BoardRuntime {
       if (card.id && card.text === text) continue;
       const save = (value) =>
         this.store.run('UPDATE tasks SET card=? WHERE id=?', JSON.stringify(value), task.id);
+      const route = this.store.project(task.project).route;
+      if (!card.id && (!route || now - (card.firstTry ?? now) >= CARD_POST_MS)) {
+        this.log(
+          `Status card of task #${task.id} is not posted: ${route ? card.error : 'the project has no chat'}`,
+        );
+        save({ ...card, retryAt: null });
+        continue;
+      }
       try {
         if (!card.id) {
-          const { channel, accountId, target, threadId } = this.store.project(task.project).route;
+          card.firstTry ??= now;
+          const { channel, accountId, target, threadId } = route;
           card.to = { channel, accountId, target, ...(threadId ? { threadId } : {}) };
           // The first post is the title alone: Discord splits a long new message into several.
           const sent = await this.rpc('message.action', {
@@ -1554,7 +1565,8 @@ export class BoardRuntime {
         const reason = String(error?.message ?? error)
           .split('\n')[0]
           .slice(0, 200);
-        const last = failures >= CARD_ATTEMPTS;
+        const posting = !card.id;
+        const last = !posting && failures >= CARD_ATTEMPTS;
         this.log(
           `Status card of task #${task.id} ${last ? 'is no longer updated' : 'not updated yet'}: ${reason}`,
         );
@@ -1562,7 +1574,7 @@ export class BoardRuntime {
           ...card,
           failures,
           error: reason,
-          retryAt: last ? null : now + Math.min(2 ** failures, 60) * MINUTE,
+          retryAt: last ? null : now + (posting ? 1 : Math.min(2 ** failures, 60)) * MINUTE,
         });
       }
     }
