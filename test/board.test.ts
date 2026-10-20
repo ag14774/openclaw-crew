@@ -1004,7 +1004,11 @@ test('the board file persists across restarts and a database of another schema i
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('a schema 1 board opens as schema 2 with its tasks intact', () => {
+// The statements the 2026.10.17 CHANGELOG entry gives the operator.
+const UPGRADE_TO_2 =
+  'BEGIN; ALTER TABLE tasks ADD COLUMN card TEXT; PRAGMA user_version=2; COMMIT;';
+
+test('a schema 1 board is refused until the CHANGELOG statements upgrade it', () => {
   const dir = mkdtempSync(join(tmpdir(), 'crew-board-'));
   const path = join(dir, 'state.sqlite');
   const old = new Store(path);
@@ -1012,6 +1016,10 @@ test('a schema 1 board opens as schema 2 with its tasks intact', () => {
   old.run("INSERT INTO tasks(project,title,plan,created,updated) VALUES('kept','Old','[x] 1',1,1)");
   old.db.exec('ALTER TABLE tasks DROP COLUMN card; PRAGMA user_version=1');
   old.close();
+  assert.throws(() => new Store(path), /schema 1, expected 2/);
+  const upgrade = new DatabaseSync(path);
+  upgrade.exec(UPGRADE_TO_2);
+  upgrade.close();
   const opened = new Store(path);
   assert.equal(opened.get('PRAGMA user_version').user_version, 2);
   assert.deepEqual(

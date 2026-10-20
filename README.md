@@ -70,7 +70,7 @@ Add a `crew` entry to your OpenClaw configuration. Replace the database path, ag
 
 - **Permissions:** grant `project_board` to the lead and enable both hook permissions shown above: `allowConversationAccess` and `allowPromptInjection`. Install the [skills](#skills) for the lead and the workers.
 - **Workers:** configure the worker's ACP runtime in OpenClaw for `runtime: "acp"`; `"subagent"` is also supported.
-- **Storage:** use a dedicated new SQLite file or an existing board at the absolute `statePath`; a **schema 1** board is upgraded to schema 2 when the plugin opens it. Never use an unrelated database.
+- **Storage:** use a dedicated new SQLite file or an existing board at the absolute `statePath`; an older board first needs the upgrade statements in the CHANGELOG. Never use an unrelated database.
 
 Restart the Gateway to load the plugin:
 

@@ -77,20 +77,20 @@ Hook errors are logged and ignored, except that a worker launch from a task sess
 
 Required configuration is shown in [getting started](getting-started.md#configure-the-plugin); the authoritative shape is [openclaw.plugin.json](https://github.com/ag14774/openclaw-crew/blob/main/openclaw.plugin.json).
 
-| Setting                         | Default / constraint                                                                                                             |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `statePath`                     | Required absolute path to a new file or a board; schema 1 is upgraded to 2 on open. `:memory:` is accepted for ephemeral use.    |
-| `leadAgentId`, `worker.agentId` | Required, different OpenClaw agent IDs.                                                                                          |
-| `ownerChat`                     | Required `channel`, `accountId`, `to`; optional `threadId`. The owner's direct chat with the lead, used for fallback.            |
-| `worker.profiles`               | Required, 1–8 profiles with `id` and `model`; optional `thinking` and `description`.                                             |
-| `worker.runtime`                | `acp`; also accepts `subagent`.                                                                                                  |
-| `worker.limit`                  | 2; range 1–20; workers launched directly from task sessions.                                                                     |
-| `sessionNamespace`              | `crew`. Task sessions are `agent:<lead>:<namespace>:task-<id>-<created>`.                                                        |
-| `scanMs`                        | 60000; range 10000–600000.                                                                                                       |
-| `turnTimeoutSeconds`            | 1800; range 60–14400, for each private task-session turn.                                                                        |
-| `maxTaskSessions`               | 2; range 1–10. Task sessions running at once.                                                                                    |
-| `rewriteModel`                  | The lead's model. A `provider/model` for rewriting project chat messages; needs the entry's `subagent.allowModelOverride: true`. |
-| `enabled`                       | Omitted means enabled; `false` stops automatic scans/wakes. This config flag does not remove the board tool.                     |
+| Setting                         | Default / constraint                                                                                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `statePath`                     | Required absolute path to a new file or a board of schema 2 (the CHANGELOG gives the statements that upgrade an older board). `:memory:` is accepted for ephemeral use. |
+| `leadAgentId`, `worker.agentId` | Required, different OpenClaw agent IDs.                                                                                                                                 |
+| `ownerChat`                     | Required `channel`, `accountId`, `to`; optional `threadId`. The owner's direct chat with the lead, used for fallback.                                                   |
+| `worker.profiles`               | Required, 1–8 profiles with `id` and `model`; optional `thinking` and `description`.                                                                                    |
+| `worker.runtime`                | `acp`; also accepts `subagent`.                                                                                                                                         |
+| `worker.limit`                  | 2; range 1–20; workers launched directly from task sessions.                                                                                                            |
+| `sessionNamespace`              | `crew`. Task sessions are `agent:<lead>:<namespace>:task-<id>-<created>`.                                                                                               |
+| `scanMs`                        | 60000; range 10000–600000.                                                                                                                                              |
+| `turnTimeoutSeconds`            | 1800; range 60–14400, for each private task-session turn.                                                                                                               |
+| `maxTaskSessions`               | 2; range 1–10. Task sessions running at once.                                                                                                                           |
+| `rewriteModel`                  | The lead's model. A `provider/model` for rewriting project chat messages; needs the entry's `subagent.allowModelOverride: true`.                                        |
+| `enabled`                       | Omitted means enabled; `false` stops automatic scans/wakes. This config flag does not remove the board tool.                                                            |
 
 The entry's `enabled` switch and hook permissions are OpenClaw settings, separate from the plugin's `config.enabled`. The lead needs `project_board` permission; its other tools and the worker runtime remain host configuration.
 

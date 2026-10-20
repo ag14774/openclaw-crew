@@ -24,7 +24,7 @@
 - rewriting a project chat message for its conversation: what the model call receives (the project context with its instructions), the long-chat trim, waiting within the turn for a busy or changing chat, sending as written when the rewrite fails, and no rewrite for the scan's own deliveries;
 - `use_this_chat` turn binding;
 - non-interference with the lead's personal work and other agents;
-- the board file surviving a restart, a schema 1 board opened as schema 2 with its tasks intact, and refusal of a database with another schema;
+- the board file surviving a restart, a schema 1 board refused until the CHANGELOG's statements upgrade it, then opened with its tasks intact, and refusal of a database with another schema;
 - one shared board when OpenClaw registers the plugin more than once in a process;
 - task sessions following the project chat's model choice, the chat's session refreshed only from that chat, and the companion's limits on `sessions.patch` (one setting per call, the model never with admin scope);
 - closed task sessions recreated by late native turns being removed again.

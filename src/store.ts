@@ -65,7 +65,6 @@ export class Store {
       const version = this.get('PRAGMA user_version').user_version;
       assert(
         version === SCHEMA_VERSION ||
-          version === 1 ||
           (version === 0 && !this.get('SELECT 1 FROM sqlite_schema LIMIT 1')),
         `statePath is not a project board (schema ${version}, expected ${SCHEMA_VERSION}); point it at a new or existing board file`,
       );
@@ -74,12 +73,8 @@ export class Store {
       this.db.exec(
         'PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;',
       );
-      this.tx(() => {
-        this.db.exec(SCHEMA);
-        // Schema 2 added the tasks' status cards.
-        if (version === 1) this.db.exec('ALTER TABLE tasks ADD COLUMN card TEXT');
-        this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
-      });
+      this.db.exec(SCHEMA);
+      this.db.exec(`PRAGMA user_version=${SCHEMA_VERSION}`);
     } catch (error) {
       this.db.close();
       throw error;

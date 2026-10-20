@@ -2,7 +2,13 @@
 
 ## 2026.10.17 - 2026-10-20
 
-Board schema 2. The plugin upgrades a schema 1 board when it opens it, in one transaction: `ALTER TABLE tasks ADD COLUMN card TEXT; PRAGMA user_version=2`. Back up the board first, as [upgrading](https://ageorgiou.com/openclaw-crew/operations/#upgrade) says; older versions refuse a schema 2 board, so going back means restoring that backup.
+Board schema 2. Stop the gateway, back up the board as [upgrading](https://ageorgiou.com/openclaw-crew/operations/#upgrade) says, then run these statements on it once before starting the new version, which refuses a schema 1 board:
+
+```sql
+BEGIN; ALTER TABLE tasks ADD COLUMN card TEXT; PRAGMA user_version=2; COMMIT;
+```
+
+Without the `sqlite3` shell, Node runs them: `node -e "new (require('node:sqlite').DatabaseSync)(process.argv[1]).exec('BEGIN; ALTER TABLE tasks ADD COLUMN card TEXT; PRAGMA user_version=2; COMMIT;')" <statePath>`. Older versions refuse a schema 2 board, so going back means restoring the backup.
 
 - Status cards: a task with a plan in a project with its own chat gets one message there showing `#<id> <title>`, its status (working on it, waiting for you, done, cancelled) and the plan as written. The scan posts it without a notification and edits it whenever that text changes, until it shows the task closed, with no model call. A failed post or edit is retried, the post under the same idempotency key; after ten failures in a row the card is left as it is and the log says so. Projects whose messages go to the owner DM get no card. Cards are not rewritten or added to the chat's session.
 - `crew-lead` protocol 1.3: the plan is the user's status card, so the lead writes it for the user (plain steps, PR links, no internal terms) and keeps it current; routine step changes need no `notify`.
@@ -13,7 +19,7 @@ Board schema 2. The plugin upgrades a schema 1 board when it opens it, in one tr
 No board schema change.
 
 - The project context is at the end of the system prompt in the project's task sessions and in its chat's session, where providers cache it, and is no longer in the task card. The task card is added to each turn's message, which OpenClaw keeps in the session's history, so every wake-up used to store another copy of the context; the project chat did not show the context at all. The rewrite of a project chat message no longer receives the context.
-- Project context can be up to 40,000 characters. `update_project` refuses longer context with an error asking to condense it, as `create_project` does, instead of cutting off the end. Tool results can be up to 64 KB, so `show` returns a full context.
+- Project context can be up to 40,000 characters. `update_project` refuses longer context with an error asking to condense it, as `create_project` does, instead of cutting off the end. Tool results can be up to 192 KB, so `show` returns a full context.
 - `crew-lead` protocol 1.2: the context is the project's current state, rewritten rather than appended to, and keeps what the lead needs; what workers need about the repository goes in the repository. When a task is closed or cancelled the lead removes its worktrees and branches and tidies the project's checkouts, so leftovers are cleared at the next close.
 
 ## 2026.10.15 - 2026-10-20

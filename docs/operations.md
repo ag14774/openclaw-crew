@@ -39,7 +39,7 @@ Do not equate a queued message, a model's summary or a transcript entry with the
 Each release's [changelog](https://github.com/ag14774/openclaw-crew/blob/main/CHANGELOG.md) entry says whether it changes the board schema. To upgrade:
 
 1. Check that ClawHub lists the new version (`openclaw plugins search openclaw-crew`); its security review can take a while after the release. Then wait until no task session or worker is running and [back up the board](recovery.md); any version of the backup script works.
-2. Stop the gateway (`openclaw gateway stop`). If the changelog lists a schema step, apply its exact statements to the board file; a schema change the plugin applies itself happens when the gateway starts.
+2. Stop the gateway (`openclaw gateway stop`). If the changelog lists a schema step, apply its exact statements to the board file.
 3. Install the new version: `openclaw plugins install clawhub:openclaw-crew@<version> --force --accept-capabilities`. With the gateway stopped, OpenClaw saves the install for its next start.
 4. Start the gateway (`openclaw gateway start`) and check [board health](#inspect-health).
 5. Re-run the worker skill loop from [installing the skills](getting-started.md#install-the-skills) to link new skills, and delete links to skills the release removed: `find ~/.config/opencode/skills -xtype l -delete`. For the `subagent` runtime, do both in the worker workspace's `skills/` folder.
