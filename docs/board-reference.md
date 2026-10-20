@@ -6,7 +6,7 @@ Detailed behavior of the `project_board` tool and its private task sessions. The
 
 ## Board records
 
-- **Projects:** name, free-text context (repositories, conventions), the chat for messages, and state (`active`, `paused`, `archived`).
+- **Projects:** name, free-text context (the lead's record of the project's current state, up to 40,000 characters), the chat for messages, and state (`active`, `paused`, `archived`).
 - **Tasks:** title, body, a free-text plan and a status: `open` (the lead's turn), `waiting` (on the user), `done` or `cancelled`.
 - **Notes:** an append-only log per task. Every status change carries one.
 - **Outbox:** messages to the user, optionally with files, delivered with native idempotency, retries and an owner-DM fallback.
@@ -68,7 +68,7 @@ Task sessions follow the model and thinking level selected in the project chat (
 
 ### Scope and failure behavior
 
-Outside the board tool and private task-session guards, the plugin adds only brief context to the lead's prompts: in every session, the session key and a short note that project work adds to the lead's usual role; in a project chat, also which project the chat belongs to and the tasks waiting on the user, each with the last message the user received for it and any newer note. Other agents and the lead's personal-assistant work are otherwise unaffected.
+Outside the board tool and private task-session guards, the plugin only adds context to the lead's prompts. Every session's system prompt starts with the session key and a short note that project work adds to the lead's usual role. The project context goes at the end of the system prompt in the project's task sessions and in its chat's session; it stays the same from turn to turn until the context changes, so providers can cache it. Each turn in a task session also gets the task card: the task, its plan and latest notes, its workers and the worker profiles. Each turn started by a user message in a project chat gets which project the chat belongs to and the tasks waiting on the user, each with the last message the user received for it and any newer note. Other agents and the lead's personal-assistant work are otherwise unaffected.
 
 Hook errors are logged and ignored, except that a worker launch from a task session is refused while the running workers cannot be counted. The board is not a security sandbox or a substitute for host tool permissions. An unavailable board is reported by the tool and health; scans log failures. The shared runtime and companion are replaced on plugin reload, or after the companion has not answered for five minutes, and scans try again using the persistent board, keeping the launches still starting.
 

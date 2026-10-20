@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.10.16 - 2026-10-20
+
+No board schema change.
+
+- The project context is at the end of the system prompt in the project's task sessions and in its chat's session, where providers cache it, and is no longer in the task card. The task card is added to each turn's message, which OpenClaw keeps in the session's history, so every wake-up used to store another copy of the context; the project chat did not show the context at all. The rewrite of a project chat message no longer receives the context.
+- Project context can be up to 40,000 characters. `update_project` refuses longer context with an error asking to condense it, as `create_project` does, instead of cutting off the end. Tool results can be up to 64 KB, so `show` returns a full context.
+- `crew-lead` protocol 1.2: the context is the project's current state, rewritten rather than appended to, and keeps what the lead needs; what workers need about the repository goes in the repository. When a task is closed or cancelled the lead removes its worktrees and branches and tidies the project's checkouts, so leftovers are cleared at the next close.
+
 ## 2026.10.15 - 2026-10-20
 
 No board schema change.

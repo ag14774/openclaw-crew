@@ -16,6 +16,7 @@
 - stall reporting and check-ins;
 - workers: profiles, the limit, cancellation and the done guard;
 - the task plan: shown on the card, kept by other updates, replaced and cleared;
+- the project context in the system prompt of its task sessions and its chat, unchanged across turns, and context over 40,000 characters refused rather than cut;
 - pause and resume;
 - the limit on task sessions running at once;
 - delivery fallback and retry identity;
