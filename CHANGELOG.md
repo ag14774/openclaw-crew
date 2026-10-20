@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026.10.17 - 2026-10-20
+
+Board schema 2. The plugin upgrades a schema 1 board when it opens it, in one transaction: `ALTER TABLE tasks ADD COLUMN card TEXT; PRAGMA user_version=2`. Back up the board first, as [upgrading](https://ageorgiou.com/openclaw-crew/operations/#upgrade) says; older versions refuse a schema 2 board, so going back means restoring that backup.
+
+- Status cards: a task with a plan in a project with its own chat gets one message there showing `#<id> <title>`, its status (working on it, waiting for you, done, cancelled) and the plan as written. The scan posts it without a notification and edits it whenever that text changes, until it shows the task closed, with no model call. A failed post or edit is retried, the post under the same idempotency key; after ten failures in a row the card is left as it is and the log says so. Projects whose messages go to the owner DM get no card. Cards are not rewritten or added to the chat's session.
+- `crew-lead` protocol 1.3: the plan is the user's status card, so the lead writes it for the user (plain steps, PR links, no internal terms) and keeps it current; routine step changes need no `notify`.
+- The rewrite of a project chat message receives the project context again, after the rewrite instructions in the call's system text.
+
 ## 2026.10.16 - 2026-10-20
 
 No board schema change.
