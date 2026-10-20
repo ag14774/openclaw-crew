@@ -7,7 +7,7 @@ Detailed behavior of the `project_board` tool and its private task sessions. The
 ## Board records
 
 - **Projects:** name, free-text context (the lead's record of the project's current state, up to 40,000 characters), the chat for messages, and state (`active`, `paused`, `archived`).
-- **Tasks:** title, body, a free-text plan and a status: `open` (the lead's turn), `waiting` (on the user), `done` or `cancelled`.
+- **Tasks:** title, body, a free-text plan, a status card in the project chat and a status: `open` (the lead's turn), `waiting` (on the user), `done` or `cancelled`.
 - **Notes:** an append-only log per task. Every status change carries one.
 - **Outbox:** messages to the user, optionally with files, delivered with native idempotency, retries and an owner-DM fallback.
 
@@ -25,7 +25,7 @@ The lead uses one tool, `project_board`, with an `operation` and its fields. `pr
 | `update_task`    | `note`, `status`, `message` with optional `attachments`, `check_in_minutes`, `plan`.                                                |
 | `notify`         | `message` to the user in the project chat, with optional `attachments`.                                                             |
 
-`check_in_minutes` accepts 10–10080; an update without it schedules the next check-in for 60 minutes. `attachments` travel with a message, not on their own. `plan` is the task's working plan, free text up to 4,000 characters that the board never interprets. Each `plan` replaces the previous one, an empty one clears it, and it is shown at the top of the task card and by `show`.
+`check_in_minutes` accepts 10–10080; an update without it schedules the next check-in for 60 minutes. `attachments` travel with a message, not on their own. `plan` is the task's working plan, free text up to 4,000 characters that the board never interprets. Each `plan` replaces the previous one, an empty one clears it, and it is shown on the task card, by `show` and on the task's status card.
 
 ## Scheduling and model choice
 
@@ -59,8 +59,9 @@ Task sessions follow the model and thinking level selected in the project chat (
 ### Delivery and chat history
 
 - Messages go only to the project chat, or the configured owner DM when there is no bound chat, the project chat rejects them or it keeps failing. Owner-DM messages are prefixed with the project name. Delivery never rebinds the project's chat.
-- Before its first send to the project chat, a message sent from the lead's turn is rewritten for the conversation it lands in. One tool-free model call as the lead, with no session, receives the chat (from the user's message that led to the task, keeping the newest messages when it is long), the task's card, the message as written, and the lead's `IDENTITY.md`, `SOUL.md` and `USER.md`. It keeps the facts and adds only the background the user needs. The call runs within that turn, because OpenClaw accepts new work only from running work. Deliveries run one at a time. While the chat's session is mid-reply, or changes during the rewrite, the turn waits and rewrites again, for up to two minutes. The sent text replaces the stored one; a failed rewrite sends the message as written. Messages the scan sends (stall notices, retries) and owner-DM fallbacks are not rewritten.
+- Before its first send to the project chat, a message sent from the lead's turn is rewritten for the conversation it lands in. One tool-free model call as the lead, with no session, receives the project context with its instructions, the chat (from the user's message that led to the task, keeping the newest messages when it is long), the task's card, the message as written, and the lead's `IDENTITY.md`, `SOUL.md` and `USER.md`. It keeps the facts and adds only the background the user needs. The call runs within that turn, because OpenClaw accepts new work only from running work. Deliveries run one at a time. While the chat's session is mid-reply, or changes during the rewrite, the turn waits and rewrites again, for up to two minutes. The sent text replaces the stored one; a failed rewrite sends the message as written. Messages the scan sends (stall notices, retries) and owner-DM fallbacks are not rewritten.
 - `notify` from the project chat itself sends nothing: the reply is the message.
+- A task with a plan in a project with its own chat has a status card there: one message with `#<id> <title>`, its status (working on it, waiting for you, done, cancelled) and the plan as written, up to 2,000 characters. The scan posts it without a notification and edits it whenever that text changes, until it shows the task closed. Projects whose messages go to the owner DM get no card. A failed post or edit is retried, backing off up to an hour, the post with the same idempotency key; after ten failures in a row the card is left as it is. Cards are not rewritten or added to the chat's session.
 - Native idempotency keys keep retries from intentionally sending duplicates. Delivery has finite retries and can become failed; `list` and health expose undelivered messages and failures.
 - Attachments are up to four existing files (absolute paths, 8 MB each). They follow the text as native message sends to the same chat, each with a stable idempotency key, and are read again on every attempt. Once the text is accepted the message is delivered and never falls back; failed files are retried in that chat, and if they keep failing the message stays delivered with the error recorded. Files must remain available until delivery finishes.
 - A delivered message is added as the lead's own reply to the session for the chat it reached (project chat or owner DM): the text as sent, then one `MEDIA:` line per file. OpenClaw's transcript writer uses a stable idempotency key so the Control UI history and later model context reflect the delivered message.
@@ -76,24 +77,24 @@ Hook errors are logged and ignored, except that a worker launch from a task sess
 
 Required configuration is shown in [getting started](getting-started.md#configure-the-plugin); the authoritative shape is [openclaw.plugin.json](https://github.com/ag14774/openclaw-crew/blob/main/openclaw.plugin.json).
 
-| Setting                         | Default / constraint                                                                                                             |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `statePath`                     | Required absolute path to a new file or schema 1 board. `:memory:` is accepted for ephemeral use.                                |
-| `leadAgentId`, `worker.agentId` | Required, different OpenClaw agent IDs.                                                                                          |
-| `ownerChat`                     | Required `channel`, `accountId`, `to`; optional `threadId`. The owner's direct chat with the lead, used for fallback.            |
-| `worker.profiles`               | Required, 1–8 profiles with `id` and `model`; optional `thinking` and `description`.                                             |
-| `worker.runtime`                | `acp`; also accepts `subagent`.                                                                                                  |
-| `worker.limit`                  | 2; range 1–20; workers launched directly from task sessions.                                                                     |
-| `sessionNamespace`              | `crew`. Task sessions are `agent:<lead>:<namespace>:task-<id>-<created>`.                                                        |
-| `scanMs`                        | 60000; range 10000–600000.                                                                                                       |
-| `turnTimeoutSeconds`            | 1800; range 60–14400, for each private task-session turn.                                                                        |
-| `maxTaskSessions`               | 2; range 1–10. Task sessions running at once.                                                                                    |
-| `rewriteModel`                  | The lead's model. A `provider/model` for rewriting project chat messages; needs the entry's `subagent.allowModelOverride: true`. |
-| `enabled`                       | Omitted means enabled; `false` stops automatic scans/wakes. This config flag does not remove the board tool.                     |
+| Setting                         | Default / constraint                                                                                                                                                    |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `statePath`                     | Required absolute path to a new file or a board of schema 2 (the CHANGELOG gives the statements that upgrade an older board). `:memory:` is accepted for ephemeral use. |
+| `leadAgentId`, `worker.agentId` | Required, different OpenClaw agent IDs.                                                                                                                                 |
+| `ownerChat`                     | Required `channel`, `accountId`, `to`; optional `threadId`. The owner's direct chat with the lead, used for fallback.                                                   |
+| `worker.profiles`               | Required, 1–8 profiles with `id` and `model`; optional `thinking` and `description`.                                                                                    |
+| `worker.runtime`                | `acp`; also accepts `subagent`.                                                                                                                                         |
+| `worker.limit`                  | 2; range 1–20; workers launched directly from task sessions.                                                                                                            |
+| `sessionNamespace`              | `crew`. Task sessions are `agent:<lead>:<namespace>:task-<id>-<created>`.                                                                                               |
+| `scanMs`                        | 60000; range 10000–600000.                                                                                                                                              |
+| `turnTimeoutSeconds`            | 1800; range 60–14400, for each private task-session turn.                                                                                                               |
+| `maxTaskSessions`               | 2; range 1–10. Task sessions running at once.                                                                                                                           |
+| `rewriteModel`                  | The lead's model. A `provider/model` for rewriting project chat messages; needs the entry's `subagent.allowModelOverride: true`.                                        |
+| `enabled`                       | Omitted means enabled; `false` stops automatic scans/wakes. This config flag does not remove the board tool.                                                            |
 
 The entry's `enabled` switch and hook permissions are OpenClaw settings, separate from the plugin's `config.enabled`. The lead needs `project_board` permission; its other tools and the worker runtime remain host configuration.
 
-SQLite uses WAL, full synchronous writes and foreign keys. New parent directories use mode `0700`, and the database file is set to `0600`. The store accepts an empty schema-zero database or schema 1; nonempty schema-zero files and other versions are refused before board DDL, chmod or journal changes. Version 20 is not a comprehensive database-identity check, so always use a dedicated board file, never an unrelated database. See [backup and staged recovery](recovery.md) for the standalone operator utility and its separate verification boundary.
+SQLite uses WAL, full synchronous writes and foreign keys. New parent directories use mode `0700`, and the database file is set to `0600`. The store accepts an empty schema-zero database or schema 2. A schema 1 board is refused until the operator runs the statements in the 2026.10.17 CHANGELOG entry; nonempty schema-zero files and other versions are refused before board DDL, chmod or journal changes. The version is not a comprehensive database-identity check, so always use a dedicated board file, never an unrelated database. See [backup and staged recovery](recovery.md) for the standalone operator utility and its separate verification boundary.
 
 ## Operator methods
 

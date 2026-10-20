@@ -25,7 +25,7 @@ Host tool permissions, credentials, filesystem access and worker isolation remai
 
 ## Delivery and storage limits
 
-Required user messages are queued with their board change. Delivery uses native idempotency identities, finite retries and the owner-DM fallback. This improves coordination but is not an unconditional delivery guarantee: messages can fail, and a successful send does not prove the user read it.
+Required user messages are queued with their board change. A task's status card in the project chat is one message the scan edits from the task's own title, status and plan, without a model call. Delivery uses native idempotency identities, finite retries and the owner-DM fallback. This improves coordination but is not an unconditional delivery guarantee: messages can fail, and a successful send does not prove the user read it.
 
 Attachments are existing absolute-path files, up to four per message and 8 MB each, read again for each attempt. Only select files intended for the recipient and keep them available until delivery finishes. Delivered text and file references are appended to the lead's chat transcript; a failed transcript append does not undo delivery.
 

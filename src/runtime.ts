@@ -35,6 +35,11 @@ const ADAPT_INSTRUCTIONS = `You are about to send a message in a project chat. I
 Reply with the message text only.`;
 const PREFERRED_ATTEMPTS = 3;
 const FALLBACK_ATTEMPTS = 10;
+// Status cards fit one Discord message, and give up on a message that keeps refusing edits.
+const CARD_CHARS = 2000;
+const CARD_ATTEMPTS = 10;
+// The gateway replays a repeated post for five minutes, so a post is retried only within four.
+const CARD_POST_MS = 4 * MINUTE;
 const ZERO_USAGE = {
   input: 0,
   output: 0,
@@ -49,6 +54,12 @@ const isClosed = (status) => status === 'done' || status === 'cancelled';
 const STATUS_LINE = {
   open: 'open, your turn',
   waiting: 'waiting on the user',
+  done: 'done',
+  cancelled: 'cancelled',
+};
+const CARD_STATUS = {
+  open: 'working on it',
+  waiting: 'waiting for you',
   done: 'done',
   cancelled: 'cancelled',
 };
@@ -124,6 +135,8 @@ const conversation = (value) => {
 };
 // The text a chat receives: the owner DM gets the project name first.
 const sentText = (row, project, toOwner) => (toOwner ? `[${project.name}] ${row.text}` : row.text);
+const contextBlock = (project) =>
+  `Project context for "${project.name}" (project ${project.id}), kept on project_board:\n${project.context}`;
 const chatLabel = (route) =>
   route
     ? `${route.channel} ${route.kind === 'direct' ? 'DM' : 'chat'} ${route.target}`
@@ -589,11 +602,12 @@ export class BoardRuntime {
     return pending;
   }
   // Before its first send to the project chat, the lead rewrites a message for the
-  // conversation it lands in, given that chat since the task's request, the task and the
-  // message as written. The model call runs within the lead's turn that sent the message,
-  // because OpenClaw admits new work only from running work; the scan's own deliveries go
-  // out as written. While the chat is mid-reply, or changed during the rewrite, it waits and
-  // tries again, for at most ADAPT_WAIT_MS. Any failure sends the message as written.
+  // conversation it lands in, given the project context, that chat since the task's request,
+  // the task and the message as written. The model call runs within the lead's turn that
+  // sent the message, because OpenClaw admits new work only from running work; the scan's
+  // own deliveries go out as written. While the chat is mid-reply, or changed during the
+  // rewrite, it waits and tries again, for at most ADAPT_WAIT_MS. Any failure sends the
+  // message as written.
   async adaptToChat(row, project, route) {
     const waitedOut = () => this.now() - row.created >= ADAPT_WAIT_MS;
     try {
@@ -615,8 +629,9 @@ export class BoardRuntime {
           ...(task ? [this.taskLines(task, project).join('\n')] : []),
           `The message to send:\n${row.text}`,
         ].join('\n\n');
+        const system = [ADAPT_INSTRUCTIONS, ...(project.context ? [contextBlock(project)] : [])];
         const adapted = text(
-          await this.adapt({ system: ADAPT_INSTRUCTIONS, message }),
+          await this.adapt({ system: system.join('\n\n'), message }),
           4000,
           'message',
         );
@@ -1091,10 +1106,7 @@ export class BoardRuntime {
         );
     return projects
       .filter((project) => project.context)
-      .map(
-        (project) =>
-          `Project context for "${project.name}" (project ${project.id}), kept on project_board:\n${project.context}`,
-      )
+      .map(contextBlock)
       .join('\n\n');
   }
   // A task with its project, description, plan and latest notes.
@@ -1274,6 +1286,7 @@ export class BoardRuntime {
       }
       await this.wakeDue(summary);
       summary.cleaned = await this.cleanupClosed();
+      await this.showCards();
       this.health.lastScan = this.now();
       this.health.lastError = this.scanProblem?.slice(0, 300) ?? null;
     } catch (error) {
@@ -1475,6 +1488,96 @@ export class BoardRuntime {
       }
     }
     return cleaned;
+  }
+  // A task with a plan in a project with its own chat gets a status card there: one message
+  // the scan posts and then edits whenever its title, status or plan change, until it shows
+  // the task closed. The card records the chat and message it was posted as, and the text
+  // and status it last showed. Failures are tried again later, the post with the same
+  // identity; a card that keeps failing is left as it is. Cards are not conversation: they
+  // are neither rewritten nor added to the chat's session.
+  async showCards() {
+    const now = this.now();
+    for (const task of this.store.all(
+      `SELECT t.* FROM tasks t JOIN projects p ON p.id=t.project
+       WHERE (t.card IS NULL AND t.plan<>'' AND t.status IN ('open','waiting') AND p.route IS NOT NULL)
+         OR (json_extract(t.card,'$.retryAt')<=? AND (t.status IN ('open','waiting') OR json_extract(t.card,'$.status') IS NOT t.status))
+       ORDER BY t.id`,
+      now,
+    )) {
+      const card = task.card ? JSON.parse(task.card) : { failures: 0 };
+      const title = `#${task.id} ${task.title}`;
+      const text = clip(
+        [title, `Status: ${CARD_STATUS[task.status]}`, ...(task.plan ? ['', task.plan] : [])].join(
+          '\n',
+        ),
+        CARD_CHARS,
+      );
+      if (card.id && card.text === text) continue;
+      const save = (value) =>
+        this.store.run('UPDATE tasks SET card=? WHERE id=?', JSON.stringify(value), task.id);
+      const route = this.store.project(task.project).route;
+      if (!card.id && (!route || now - (card.firstTry ?? now) >= CARD_POST_MS)) {
+        this.log(
+          `Status card of task #${task.id} is not posted: ${route ? card.error : 'the project has no chat'}`,
+        );
+        save({ ...card, retryAt: null });
+        continue;
+      }
+      try {
+        if (!card.id) {
+          card.firstTry ??= now;
+          const { channel, accountId, target, threadId } = route;
+          card.to = { channel, accountId, target, ...(threadId ? { threadId } : {}) };
+          // The first post is the title alone: Discord splits a long new message into several.
+          const sent = await this.rpc('message.action', {
+            channel,
+            action: 'send',
+            accountId,
+            agentId: topology().leadAgentId,
+            params: { to: target, ...(threadId ? { threadId } : {}), message: title, silent: true },
+            idempotencyKey: `crew-card-${taskScope(task)}`,
+          });
+          const id = sent?.messageId ?? sent?.result?.messageId;
+          assert(id, 'The chat returned no message id');
+          Object.assign(card, { id: String(id), text: title });
+          save(card);
+        }
+        if (card.text !== text) {
+          const { channel, accountId, target, threadId } = card.to;
+          await this.rpc('message.action', {
+            channel,
+            action: 'edit',
+            accountId,
+            // The board edits its own message, outside any agent's conversation.
+            conversationReadOrigin: 'direct-operator',
+            params: {
+              to: target,
+              ...(threadId ? { threadId } : {}),
+              messageId: card.id,
+              message: text,
+            },
+            idempotencyKey: randomUUID(),
+          });
+        }
+        save({ to: card.to, id: card.id, text, status: task.status, failures: 0, retryAt: 0 });
+      } catch (error) {
+        const failures = card.failures + 1;
+        const reason = String(error?.message ?? error)
+          .split('\n')[0]
+          .slice(0, 200);
+        const posting = !card.id;
+        const last = !posting && failures >= CARD_ATTEMPTS;
+        this.log(
+          `Status card of task #${task.id} ${last ? 'is no longer updated' : 'not updated yet'}: ${reason}`,
+        );
+        save({
+          ...card,
+          failures,
+          error: reason,
+          retryAt: last ? null : now + (posting ? 1 : Math.min(2 ** failures, 60)) * MINUTE,
+        });
+      }
+    }
   }
   healthReport() {
     const count = (sql) => this.store.get(sql).n;

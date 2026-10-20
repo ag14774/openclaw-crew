@@ -30,6 +30,8 @@ Inspect pending/failed outbox state with `list` and health, then check the nativ
 
 Keep attachment paths available and readable until delivery finishes. A failed file retries the message using stable native identities for already-sent parts. Transcript recording is separate: it waits while the chat session is active and is retried by the scan for a day. Its failure is logged without changing delivery status.
 
+A status card that stopped changing has failed ten edits in a row, and a card that never appeared could not be posted within four minutes (a later retry might post it twice); both are left as they are, and the gateway log says why each attempt failed. A card stays in the chat it was posted in if the project moves to another chat.
+
 Do not equate a queued message, a model's summary or a transcript entry with the user having read it.
 
 ## Upgrade

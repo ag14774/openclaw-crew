@@ -415,6 +415,136 @@ test('the plan is kept on the task, shown on its card, and replaced or cleared a
   assert.equal((await h.call(LEAD_DM, { operation: 'show', task })).task.plan, undefined);
 });
 
+test('the plan is shown in the project chat as a status card, edited as the task changes', async () => {
+  const h = await harness();
+  await chatProject(h);
+  const calls = [];
+  h.runtime.adapt = async (input) => {
+    calls.push(input);
+    return 'Rewritten';
+  };
+  const { task } = await addTask(h, 'CSV export');
+  const tKey = key(h, task);
+  const update = (input) => h.call(tKey, { operation: 'update_task', ...input });
+  // No card until the task has a plan.
+  await h.tick();
+  assert.equal(h.native.posts.length, 0);
+
+  // The card is posted once, quietly, and edited to the full text in the same scan.
+  await update({ plan: '[~] 1 Build — PR #12\n[ ] 2 Review' });
+  await h.tick();
+  assert.equal(h.native.posts.length, 1);
+  const post = h.native.posts[0];
+  assert.deepEqual(
+    [post.channel, post.params.to, post.params.message, post.params.silent],
+    ['telegram', 'telegram:-200', `#${task} CSV export`, true],
+  );
+  const edit = h.native.edits.at(-1);
+  assert.deepEqual(
+    [edit.channel, edit.params.to, edit.params.messageId, edit.conversationReadOrigin],
+    ['telegram', 'telegram:-200', 'm-1', 'direct-operator'],
+  );
+  assert.equal(
+    edit.params.message,
+    `#${task} CSV export\nStatus: working on it\n\n[~] 1 Build — PR #12\n[ ] 2 Review`,
+  );
+
+  // It is edited only when what it shows changes.
+  await update({ note: 'Build is green' });
+  await h.tick();
+  assert.equal(h.native.edits.length, 1);
+  await update({ status: 'waiting', note: 'Asked', message: 'Which columns?' });
+  await h.tick();
+  assert.match(h.native.edits.at(-1).params.message, /^#\d+ CSV export\nStatus: waiting for you\n/);
+
+  // Closing edits it a last time; then it is left alone.
+  await update({ status: 'done', note: 'Merged', message: 'CSV export is live.' });
+  await h.tick();
+  assert.match(h.native.edits.at(-1).params.message, /Status: done/);
+  h.advance(60 * MINUTE);
+  await h.tick();
+  assert.deepEqual([h.native.posts.length, h.native.edits.length], [1, 3]);
+  // The card is neither rewritten nor added to the chat's session.
+  assert.equal(calls.length, 2);
+  assert.ok(h.native.transcript.every((entry) => !/Status:/.test(entry.message.content[0].text)));
+});
+
+test('a project without its own chat gets no status card', async () => {
+  const h = await harness();
+  await h.call('agent:lead:operator', { operation: 'create_project', name: 'Quote Desk' });
+  const { task } = await addTask(h, 'CSV export');
+  await h.call(key(h, task), { operation: 'update_task', plan: '[ ] 1 Build' });
+  await h.tick();
+  assert.equal(h.native.posts.length, 0);
+});
+
+test('a failed status card post is retried without posting twice; a card whose message is gone is left alone', async () => {
+  const h = await harness();
+  await project(h);
+  const { task } = await addTask(h, 'CSV export');
+  const update = (plan) => h.call(key(h, task), { operation: 'update_task', plan });
+  // The post reaches the chat but its result is lost; the retry uses the same identity.
+  h.native.lose.add('message.action');
+  await update('[ ] 1 Build');
+  await h.tick();
+  assert.match(h.warnings.at(-1), /Status card of task #\d+ not updated yet/);
+  h.native.lose.delete('message.action');
+  h.advance(2 * MINUTE);
+  await h.tick();
+  const posts = h.native.calls.filter(([m, p]) => m === 'message.action' && p.action === 'send');
+  assert.equal(posts.length, 2);
+  assert.equal(new Set(posts.map(([, p]) => p.idempotencyKey)).size, 1);
+  assert.equal(h.native.posts.length, 1);
+  assert.match(h.native.edits.at(-1).params.message, /\[ \] 1 Build$/);
+
+  // Once the chat no longer has the message, edits are tried for a while, then given up.
+  h.native.gone.add('m-1');
+  await update('[x] 1 Build');
+  const edits = () =>
+    h.native.calls.filter(([m, p]) => m === 'message.action' && p.action === 'edit').length;
+  const before = edits();
+  for (let i = 0; i < 20; i++) {
+    h.advance(60 * MINUTE);
+    await h.tick();
+  }
+  assert.equal(edits() - before, 10);
+  assert.ok(
+    h.warnings.some((w) => /card of task #\d+ is no longer updated: Unknown Message/.test(w)),
+  );
+  await update('[x] 1 Build\n[ ] 2 Review');
+  await h.tick();
+  assert.equal(edits() - before, 10);
+  assert.equal(h.native.posts.length, 1);
+});
+
+test('a status card post is never retried once the gateway may have forgotten it', async () => {
+  const h = await harness();
+  await project(h);
+  const { task } = await addTask(h, 'CSV export');
+  // The post reaches the chat but its result is lost, then the gateway stays out of reach.
+  h.native.lose.add('message.action');
+  await h.call(key(h, task), { operation: 'update_task', plan: '[ ] 1 Build' });
+  await h.tick();
+  h.native.lose.delete('message.action');
+  h.native.down.add('message.action');
+  const sends = () =>
+    h.native.calls.filter(([m, p]) => m === 'message.action' && p.action === 'send').length;
+  for (let i = 0; i < 4; i++) {
+    h.advance(MINUTE);
+    await h.tick();
+  }
+  const tried = sends();
+  // Past the gateway's replay window the post is given up rather than sent again.
+  h.native.down.delete('message.action');
+  for (let i = 0; i < 5; i++) {
+    h.advance(MINUTE);
+    await h.tick();
+  }
+  assert.equal(sends(), tried);
+  assert.equal(h.native.posts.length, 1);
+  assert.ok(h.warnings.some((w) => /Status card of task #\d+ is not posted/.test(w)));
+});
+
 test('the project context is in the system prompt of its task sessions and its chat', async () => {
   const h = await harness();
   await project(h);
@@ -675,6 +805,8 @@ async function chatProject(h) {
 test('a project chat message is rewritten for the conversation before it is sent', async () => {
   const h = await harness();
   const { say } = await chatProject(h);
+  const context = 'Repository ~/projects/quote-desk.';
+  await h.call(LEAD_DM, { operation: 'update_project', project: 'quote-desk', context });
   say('user', 'Old chatter');
   h.advance(MINUTE);
   say('user', 'Please add CSV export');
@@ -696,9 +828,19 @@ test('a project chat message is rewritten for the conversation before it is sent
   });
   assert.equal(closed.message.state, 'sent');
   assert.equal(h.native.sent.at(-1).message, 'The CSV export you asked for is done.');
-  // The rewrite sees the chat from the request on, the task, and the message as written.
+  // The rewrite sees the project context with its instructions, then the chat from the
+  // request on, the task, and the message as written.
   const { system, message } = calls[0];
-  assert.match(system, /Keep every fact/);
+  assert.match(
+    system,
+    /^You are about to send a message in a project chat\.[\s\S]*Keep every fact/,
+  );
+  assert.ok(
+    system.endsWith(
+      `Reply with the message text only.\n\nProject context for "Quote Desk" (project quote-desk), kept on project_board:\n${context}`,
+    ),
+  );
+  assert.doesNotMatch(message, /Repository/);
   assert.doesNotMatch(message, /Old chatter/);
   assert.match(
     message,
@@ -788,9 +930,10 @@ test('the rewrite runs as the lead, with its workspace files and the configured 
     assert.equal(h.native.sent.at(-1).message, 'Rewritten');
     const [{ agentId, model, extraSystemPrompt }] = calls;
     assert.deepEqual([agentId, model], ['lead', 'openai/gpt-5.6-terra']);
+    // A project without context adds none.
     assert.match(
       extraSystemPrompt,
-      /Keep every fact[\s\S]*Calm and precise\.\n\nExplain in plain words\.$/,
+      /Keep every fact[\s\S]*Reply with the message text only\.\n\nWho you are[\s\S]*Calm and precise\.\n\nExplain in plain words\.$/,
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -885,7 +1028,37 @@ test('the board file persists across restarts and a database of another schema i
   const other = new DatabaseSync(foreign);
   other.exec('PRAGMA user_version=99');
   other.close();
-  assert.throws(() => new Store(foreign), /not a project board \(schema 99, expected 1\)/);
+  assert.throws(() => new Store(foreign), /not a project board \(schema 99, expected 2\)/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// The statements the 2026.10.17 CHANGELOG entry gives the operator.
+const UPGRADE_TO_2 =
+  'BEGIN; ALTER TABLE tasks ADD COLUMN card TEXT; PRAGMA user_version=2; COMMIT;';
+
+test('a schema 1 board is refused until the CHANGELOG statements upgrade it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'crew-board-'));
+  const path = join(dir, 'state.sqlite');
+  const old = new Store(path);
+  old.run("INSERT INTO projects(id,name,created,updated) VALUES('kept','Kept',1,1)");
+  old.run("INSERT INTO tasks(project,title,plan,created,updated) VALUES('kept','Old','[x] 1',1,1)");
+  old.db.exec('ALTER TABLE tasks DROP COLUMN card; PRAGMA user_version=1');
+  old.close();
+  assert.throws(() => new Store(path), /schema 1, expected 2/);
+  const upgrade = new DatabaseSync(path);
+  upgrade.exec(UPGRADE_TO_2);
+  upgrade.close();
+  const opened = new Store(path);
+  assert.equal(opened.get('PRAGMA user_version').user_version, 2);
+  assert.deepEqual(
+    [opened.task(1).title, opened.task(1).plan, opened.task(1).card],
+    ['Old', '[x] 1', null],
+  );
+  opened.close();
+  // Opening it again changes nothing.
+  const again = new Store(path);
+  assert.equal(again.task(1).title, 'Old');
+  again.close();
   rmSync(dir, { recursive: true, force: true });
 });
 

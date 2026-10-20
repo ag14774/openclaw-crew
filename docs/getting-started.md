@@ -61,7 +61,7 @@ Add this entry to your OpenClaw configuration. All paths, agent IDs, chat destin
 }
 ```
 
-Use a dedicated **new database file** or an existing **schema 1 board** at the absolute `statePath`. The store's schema-version check does not prove a database belongs to this plugin: never use an unrelated database. `:memory:` is ephemeral and unsuitable for durable work.
+Use a dedicated **new database file** or an existing board at the absolute `statePath`; a board of an older schema needs the statements its CHANGELOG entry gives. The store's schema-version check does not prove a database belongs to this plugin: never use an unrelated database. `:memory:` is ephemeral and unsuitable for durable work.
 
 Grant `project_board` to the lead in its OpenClaw tool permissions and [install the skills](#install-the-skills). Configure the worker's ACP runtime in OpenClaw when using `acp`; `subagent` is also supported. The plugin does not configure the agents, providers or channel for you.
 

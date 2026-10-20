@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 
 // The board: projects, tasks, their notes, and the notification outbox. An open task is the
 // lead's turn; a waiting one waits on the user.
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS projects(
@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS tasks(
   idle_wakes INTEGER NOT NULL DEFAULT 0,
   stalled INTEGER,
   cleaned INTEGER,
+  card TEXT,
   created INTEGER NOT NULL,
   updated INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS tasks_open ON tasks(status, project);
