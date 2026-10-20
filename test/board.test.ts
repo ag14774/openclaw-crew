@@ -445,7 +445,8 @@ test('the project context is in the system prompt of its task sessions and its c
 
 test('project context over 40,000 characters is refused, not cut', async () => {
   const h = await harness();
-  const fits = 'x'.repeat(40000);
+  // Three UTF-8 bytes each: the full context must still come back from show.
+  const fits = '界'.repeat(40000);
   await h.userMessage(LEAD_GROUP, 'telegram:-200');
   const create = (context) =>
     h.call(LEAD_GROUP, { operation: 'create_project', name: 'Quote Desk', context });

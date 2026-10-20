@@ -86,7 +86,8 @@ const parameters = {
   },
 };
 
-const OUTPUT_LIMIT = 64 * 1024;
+// Room for a full project context (40,000 characters, up to three bytes each).
+const OUTPUT_LIMIT = 192 * 1024;
 const bound = (value) => {
   const encoded = JSON.stringify(value ?? null);
   return Buffer.byteLength(encoded) <= OUTPUT_LIMIT

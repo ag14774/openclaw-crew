@@ -358,7 +358,7 @@ export class BoardRuntime {
     const changes = {};
     if (input.name !== undefined) changes.name = line(input.name, 120, 'name');
     if (input.context !== undefined)
-      changes.context = optional(input.context, MAX_CONTEXT, 'context') ?? '';
+      changes.context = optional(String(input.context).trim(), MAX_CONTEXT, 'context') ?? '';
     if (input.use_this_chat) {
       const route = caller.source?.route;
       assert(
