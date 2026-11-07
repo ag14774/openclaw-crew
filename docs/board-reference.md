@@ -2,7 +2,7 @@
 
 [Documentation home](index.md) · [Repository README](https://github.com/ag14774/openclaw-crew/blob/main/README.md)
 
-Detailed behavior of the `project_board` tool and its private task sessions. The bundled [crew-lead skill](https://github.com/ag14774/openclaw-crew/blob/main/skills/crew-lead/SKILL.md) describes the lead's judgment and working procedure; the rules below describe checks the plugin can enforce from callers, board rows and native calls.
+Detailed behavior of the `project_board` tool and its private task sessions. The bundled [crew-lead skill](https://github.com/ag14774/openclaw-crew/blob/main/skills/crew-lead/SKILL.md) describes the lead's judgment and owner-waivable [workflow defaults](workflow.md#workflow-defaults); the rules below describe unchanged mechanical checks the plugin can enforce from callers, board rows and native calls.
 
 ## Board records
 

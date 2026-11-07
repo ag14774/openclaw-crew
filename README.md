@@ -121,6 +121,8 @@ Do not use `~/.agents/skills`: OpenClaw shows that folder to every agent, the le
 
 By default, the board scans every **60 seconds** for changed tasks or due check-ins (normally **60 minutes**). It wakes the lead in the task's session without interrupting an active turn; tasks waiting on you get no automatic wakes. Use `/model` and `/think` in the project chat to choose settings for the task sessions; otherwise agent defaults apply.
 
+Crew workflow requirements, including CI, are defaults you may explicitly waive. The lead and workers follow your directions through authorized routes and report failed or skipped checks honestly. See [workflow defaults](https://ageorgiou.com/openclaw-crew/workflow/#workflow-defaults) for the boundaries.
+
 The [board reference](https://ageorgiou.com/openclaw-crew/board-reference/) covers all seven `project_board` operations, task statuses, scheduling, delivery and operator methods.
 
 ## Safety and limitations

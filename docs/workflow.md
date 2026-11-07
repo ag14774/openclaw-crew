@@ -8,7 +8,11 @@
 4. **Answer questions on that task.** When the lead needs you, it sets the task to waiting and asks in the chat. Your answer is recorded on the task, which puts it back to the lead; no separate task is needed for the question.
 5. **Review and finish.** The lead checks each requested point against the result, closes the task and tells you what changed or what remains incomplete.
 
-These are the bundled skill's working practices. The board mechanically requires a note on every status change and a message when asking you or closing a task, but it does not inspect the quality of a review, run CI or verify a merge.
+## Workflow defaults
+
+You may explicitly waive Crew workflow requirements, including CI. The lead and workers follow your directions through authorized routes and report failed or skipped checks honestly. Warnings do not create a veto or a need to approve again. The [lead skill](https://github.com/ag14774/openclaw-crew/blob/main/skills/crew-lead/SKILL.md) carries the working procedure.
+
+Higher-priority system instructions, platform/tool permissions and model safety constraints still apply; Crew guidance adds no capability or refusal restrictions beyond these. The board's mechanical checks are unchanged: it requires a note on every status change and a message when asking you or closing a task, but it does not inspect the quality of a review, run CI or verify a merge.
 
 ## Progress and waiting
 

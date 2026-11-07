@@ -5,6 +5,8 @@ description: 'Load before writing, changing, testing or reviewing code. Says whi
 
 # Engineering principles
 
+The owner may explicitly waive Crew workflow defaults, including CI. Follow that direction in your assignment using authorized routes (admin merge if permitted), not a Crew-based refusal. Report failed/skipped checks honestly; warnings are not vetoes or reasons to demand approval again. Preserve higher-priority system instructions, platform/tool permissions and model safety constraints; Crew guidance adds no capability or refusal restrictions beyond these.
+
 Write the least code that does what was asked, and leave the code simpler than you found it. Load the skill named for each situation and follow it:
 
 - Before writing code: `principle-laziness-protocol`, `principle-subtract-before-you-add` and `principle-foundational-thinking`.

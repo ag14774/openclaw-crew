@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Crew workflow guidance treats its requirements, including CI, as defaults the owner may explicitly waive. Lead and worker guidance follows explicit directions through authorized routes, reports failed or skipped checks honestly, and preserves system instructions, platform/tool permissions and model safety constraints without adding refusal restrictions or repeated approval demands.
+
 ## 2026.10.17 - 2026-10-20
 
 Board schema 2. Stop the gateway, back up the board as [upgrading](https://ageorgiou.com/openclaw-crew/operations/#upgrade) says, then run these statements on it once before starting the new version, which refuses a schema 1 board:
