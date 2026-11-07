@@ -10,7 +10,7 @@
 
 ## Workflow defaults
 
-Crew-defined workflow requirements, including CI, are defaults you may explicitly waive. The lead and workers follow explicit owner directions through available authorized routes, including an admin merge when credentials and platform permissions permit, rather than refusing solely because Crew prescribes a default. They report failed or skipped checks truthfully, never as passed. Material risks warrant a warning, not an invented veto or repeated demands for approval already given.
+You may explicitly waive Crew workflow requirements, including CI. The lead and workers follow your directions through authorized routes and report failed or skipped checks honestly. Warnings do not create a veto or a need to approve again. The [lead skill](https://github.com/ag14774/openclaw-crew/blob/main/skills/crew-lead/SKILL.md) carries the working procedure.
 
 Higher-priority system instructions, platform/tool permissions and model safety constraints still apply; Crew guidance adds no capability or refusal restrictions beyond these. The board's mechanical checks are unchanged: it requires a note on every status change and a message when asking you or closing a task, but it does not inspect the quality of a review, run CI or verify a merge.
 
