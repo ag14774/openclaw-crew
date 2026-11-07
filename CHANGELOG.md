@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2026.11.0 - 2026-11-07
 
 - Crew workflow guidance treats its requirements, including CI, as defaults the owner may explicitly waive. Lead and worker guidance follows explicit directions through authorized routes, reports failed or skipped checks honestly, and preserves system instructions, platform/tool permissions and model safety constraints without adding refusal restrictions or repeated approval demands.
 
